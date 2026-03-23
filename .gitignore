@@ -15,8 +15,11 @@ data/
 *.mov
 *.avi
 
-# -------- Env --------
+# -------- Env & Secrets --------
 .env
+.env.local
+volleyball-backend-key.json
+~/.volleyball-backend-key.json
 
 # -------- Mac --------
 .DS_Store
