@@ -113,3 +113,11 @@ volleyball-ai-platform/
 2. **Detection** — Integrate YOLOv8 for player/ball tracking
 3. **Play Recognition** — Classify plays (dig, set, spike, etc.)
 4. **Visualization** — Render ball trajectories on video
+
+
+# Download the file from Google Drive
+# Then save it to home directory:
+mv ~/Downloads/volleyball-backend-key.json ~/.volleyball-backend-key.json
+
+# Verify:
+ls ~/.volleyball-backend-key.json
