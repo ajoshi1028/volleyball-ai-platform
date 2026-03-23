@@ -129,6 +129,16 @@ python -m json.tool ~/.volleyball-backend-key.json
 - If code fails, share the full error message
 - Always test locally before committing
 
+## Team
+
+| Person | Track | Responsibilities |
+|--------|-------|-----------------|
+| **Kyle** | Frontend | Upload UI, results display, connecting frontend to backend API |
+| **Yoshi** | YOLO Detection | `/detect` endpoint, running YOLOv8 on videos, returning bounding boxes |
+| **Josh** | Data + Play Recognition | `GET /results/{video_id}`, storing detection output, play recognition logic |
+
+**Integration point:** Yoshi and Josh should agree on a JSON schema for detection results before splitting off. Kyle can build against mock data until the backend is ready.
+
 ## Hackathon Strategy
 **Priority order:**
 1. Get basic upload working ✅
