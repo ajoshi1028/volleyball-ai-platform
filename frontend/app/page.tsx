@@ -1,65 +1,210 @@
-import Image from "next/image";
+"use client";
+
+import { useRef, useState, useEffect } from "react";
+import Nav from "./components/Nav";
+import FilmLibrary from "./components/FilmLibrary";
+import VideoUploader from "./components/VideoUploader";
+import VideoPlayer, { VideoPlayerHandle } from "./components/VideoPlayer";
+import PlayerTrackingPanel from "./components/PlayerTrackingPanel";
+import PlayTimeline from "./components/PlayTimeline";
+import { DetectionFrame, FilmRecord, Play, TrackedPlayer, UploadResponse } from "./types";
+
+const STORAGE_KEY = "volleyball-films";
+
+const MOCK_PLAYS: Play[] = [
+  { id: "1", label: "Serve",  timestamp: 4  },
+  { id: "2", label: "Dig",   timestamp: 11 },
+  { id: "3", label: "Set",   timestamp: 18 },
+  { id: "4", label: "Spike", timestamp: 24 },
+  { id: "5", label: "Block", timestamp: 31 },
+];
+
+const MOCK_PLAYERS: TrackedPlayer[] = [
+  { id: "p1", jersey: 3,  position: "OH", x: 0.24, y: 0.61 },
+  { id: "p2", jersey: 7,  position: "S",  x: 0.51, y: 0.55 },
+  { id: "p3", jersey: 11, position: "MB", x: 0.38, y: 0.48 },
+  { id: "p4", jersey: 14, position: "L",  x: 0.67, y: 0.72 },
+  { id: "p5", jersey: 2,  position: "OH", x: 0.19, y: 0.43 },
+  { id: "p6", jersey: 9,  position: "RS", x: 0.79, y: 0.51 },
+];
+
+type Screen = "library" | "upload" | "review";
+
+function loadFilms(): FilmRecord[] {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+  } catch { return []; }
+}
+
+function saveFilms(films: FilmRecord[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(films));
+}
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+  const playerRef = useRef<VideoPlayerHandle>(null);
+
+  const [screen, setScreen] = useState<Screen>("library");
+  const [films, setFilms] = useState<FilmRecord[]>([]);
+  const [localUrls] = useState(() => new Map<string, string>());
+
+  const [activeFilm, setActiveFilm] = useState<FilmRecord | null>(null);
+  const [localVideoUrl, setLocalVideoUrl] = useState("");
+  const [detectionFrames, setDetectionFrames] = useState<DetectionFrame[]>([]);
+  const [plays, setPlays] = useState<Play[]>([]);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [mockMode, setMockMode] = useState(false);
+
+  useEffect(() => { setFilms(loadFilms()); }, []);
+
+  const currentPlayers: TrackedPlayer[] = mockMode
+    ? MOCK_PLAYERS
+    : detectionFrames.find((f) => Math.abs(f.timestamp - currentTime) < 0.1)?.players ?? [];
+
+  const activePlays = mockMode ? MOCK_PLAYS : plays;
+
+  // Save duration + thumbnail back to the film record once we have them
+  useEffect(() => {
+    if (!activeFilm || !videoDuration) return;
+    setFilms((prev) => {
+      const updated = prev.map((f) => f.id === activeFilm.id ? { ...f, duration: videoDuration } : f);
+      saveFilms(updated);
+      return updated;
+    });
+  }, [videoDuration]);
+
+  function handleThumbnail(dataUrl: string) {
+    if (!activeFilm) return;
+    setFilms((prev) => {
+      const updated = prev.map((f) => f.id === activeFilm.id ? { ...f, thumbnail: dataUrl } : f);
+      saveFilms(updated);
+      return updated;
+    });
+  }
+
+  function openReview(film: FilmRecord, localUrl: string) {
+    setActiveFilm(film);
+    setLocalVideoUrl(localUrl);
+    setDetectionFrames([]);
+    setPlays([]);
+    setCurrentTime(0);
+    setVideoDuration(0);
+    setMockMode(false);
+    setAnalyzing(true);
+    setScreen("review");
+
+    // TODO (Yoshi): replace with real /detect call
+    // TODO (Josh): replace with real /results call
+    setTimeout(() => setAnalyzing(false), 3000);
+  }
+
+  async function handleUploadComplete(result: UploadResponse, localUrl: string) {
+    const film: FilmRecord = {
+      id: crypto.randomUUID(),
+      filename: result.filename,
+      gcs_uri: result.gcs_uri,
+      uploadedAt: new Date().toISOString(),
+    };
+    localUrls.set(film.id, localUrl);
+    setFilms((prev) => {
+      const updated = [film, ...prev];
+      saveFilms(updated);
+      return updated;
+    });
+    openReview(film, localUrl);
+  }
+
+  function handleNewUploadFile(file: File) {
+    // Go to upload screen but pre-load the file
+    const localUrl = URL.createObjectURL(file);
+    handleUploadComplete({ gcs_uri: "", filename: file.name }, localUrl);
+  }
+
+  function handleSeek(time: number) {
+    playerRef.current?.seek(time);
+  }
+
+  function goToLibrary() {
+    setScreen("library");
+    setActiveFilm(null);
+  }
+
+  const mockToggle = (
+    <button
+      onClick={() => setMockMode((p) => !p)}
+      className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-all"
+      style={
+        mockMode
+          ? { background: "var(--ppu-orange-dim)", color: "var(--ppu-orange)", borderColor: "rgba(255,99,0,0.4)" }
+          : { background: "transparent", color: "#64748b", borderColor: "var(--ppu-border)" }
+      }
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${mockMode ? "bg-orange-500" : "bg-slate-600"}`} />
+      Mock data {mockMode ? "on" : "off"}
+    </button>
+  );
+
+  if (screen === "library") {
+    return (
+      <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--ppu-navy)" }}>
+        <Nav onBackToLibrary={goToLibrary} />
+        <FilmLibrary
+          films={films}
+          localUrls={localUrls}
+          onOpen={(film, url) => openReview(film, url)}
+          onReupload={(film, url) => { localUrls.set(film.id, url); openReview(film, url); }}
+          onNewUpload={handleNewUploadFile}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      </div>
+    );
+  }
+
+  if (screen === "upload") {
+    return (
+      <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--ppu-navy)" }}>
+        <Nav onBackToLibrary={goToLibrary} />
+        <VideoUploader onUploadComplete={handleUploadComplete} />
+      </div>
+    );
+  }
+
+  // Review screen
+  return (
+    <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--ppu-navy)" }}>
+      <Nav
+        currentFilm={activeFilm?.filename}
+        onBackToLibrary={goToLibrary}
+        rightSlot={mockToggle}
+      />
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            <VideoPlayer
+              ref={playerRef}
+              src={localVideoUrl}
+              detections={detectionFrames}
+              analyzing={analyzing}
+              onTimeUpdate={setCurrentTime}
+              onDurationChange={setVideoDuration}
+              onThumbnail={handleThumbnail}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </div>
+          <PlayTimeline
+            plays={activePlays}
+            duration={videoDuration}
+            analyzing={analyzing}
+            onSeek={handleSeek}
+          />
         </div>
-      </main>
+        <div className="w-64 shrink-0">
+          <PlayerTrackingPanel
+            players={currentPlayers}
+            currentTime={currentTime}
+            analyzing={analyzing}
+          />
+        </div>
+      </div>
     </div>
   );
 }
