@@ -1,0 +1,29 @@
+.upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.upload-form input {
+  padding: 10px;
+  border: 2px solid #667eea;
+  border-radius: 6px;
+}
+
+.upload-form button {
+  padding: 12px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.upload-form button:hover:not(:disabled) {
+  background: #764ba2;
+}
+
+.upload-form button:disabled {
+  opacity: 0.5;
+}

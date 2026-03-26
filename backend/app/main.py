@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import tempfile
 import sys
@@ -9,8 +10,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.gcs import upload_to_gcs
+from utils.detection import detect_in_video
 
 app = FastAPI(title="Volleyball AI Platform")
+
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -72,18 +83,26 @@ async def upload_video(file: UploadFile = File(...)):
 @app.post("/detect")
 async def detect_plays(gcs_uri: str):
     """
-    Placeholder for YOLO detection endpoint.
+    Run YOLO detection on a video stored in GCS.
 
     Args:
         gcs_uri: GCS URI of the video to process
 
     Returns:
-        Detection results (coordinates, play types, etc.)
+        Detection results with player counts and annotated video
     """
-    return {
-        "message": "Detection endpoint - coming soon",
-        "gcs_uri": gcs_uri,
-    }
+    try:
+        results = detect_in_video(gcs_uri)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "Detection completed",
+                "gcs_uri": gcs_uri,
+                **results,
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
