@@ -29,10 +29,11 @@ export interface FilmRecord {
   thumbnail?: string; // base64 data URL, captured from first frame
 }
 
-// Josh — update when /results/{video_id} response shape is finalized
+// Josh — matches /results/{video_id} response shape
 export interface Play {
   id: string;
-  label: string;
-  timestamp: number;
-  [key: string]: unknown;
+  label: string;       // mapped from "play" field
+  timestamp: number;   // mapped from start_time_sec for seeking
+  start_time_sec: number;
+  end_time_sec: number;
 }

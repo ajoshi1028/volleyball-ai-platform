@@ -10,6 +10,7 @@ import PlayTimeline from "./components/PlayTimeline";
 import { DetectionFrame, FilmRecord, Play, TrackedPlayer, UploadResponse } from "./types";
 
 const STORAGE_KEY = "volleyball-films";
+const API_BASE = "http://localhost:8000";
 
 const MOCK_PLAYS: Play[] = [
   { id: "1", label: "Serve",  timestamp: 4  },
@@ -83,7 +84,7 @@ export default function Home() {
     });
   }
 
-  function openReview(film: FilmRecord, localUrl: string) {
+  async function openReview(film: FilmRecord, localUrl: string) {
     setActiveFilm(film);
     setLocalVideoUrl(localUrl);
     setDetectionFrames([]);
@@ -94,9 +95,31 @@ export default function Home() {
     setAnalyzing(true);
     setScreen("review");
 
-    // TODO (Yoshi): replace with real /detect call
-    // TODO (Josh): replace with real /results call
-    setTimeout(() => setAnalyzing(false), 3000);
+    // Skip API calls if no GCS URI (dev/local preview mode)
+    if (!film.gcs_uri) { setAnalyzing(false); return; }
+
+    try {
+      // Step 1 (Yoshi): run YOLO detection on the uploaded video
+      await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`);
+
+      // Step 2 (Josh): fetch play recognition results
+      const res = await fetch(`${API_BASE}/results/${encodeURIComponent(film.filename)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const mapped: Play[] = (data.plays?.plays ?? []).map((p: { play: string; start_time_sec: number; end_time_sec: number }, i: number) => ({
+          id: String(i),
+          label: p.play,
+          timestamp: p.start_time_sec,
+          start_time_sec: p.start_time_sec,
+          end_time_sec: p.end_time_sec,
+        }));
+        setPlays(mapped);
+      }
+    } catch (err) {
+      console.error("Detection/results error:", err);
+    } finally {
+      setAnalyzing(false);
+    }
   }
 
   async function handleUploadComplete(result: UploadResponse, localUrl: string) {
