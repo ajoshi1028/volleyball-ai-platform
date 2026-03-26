@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import tempfile
@@ -14,6 +15,13 @@ from utils.gcs import upload_to_gcs
 from utils.play_recognition import recognize_plays
 
 app = FastAPI(title="Volleyball AI Platform")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------------------------------------------------------------------
 # In-memory results store  { video_id: { "detections": ..., "plays": ... } }

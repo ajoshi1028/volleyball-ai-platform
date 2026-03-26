@@ -4,13 +4,12 @@ import { useRef } from "react";
 import { FilmRecord } from "../types";
 
 const ACCEPTED_FORMATS = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"];
-
 interface Props {
   films: FilmRecord[];
   localUrls: Map<string, string>;
   onOpen: (film: FilmRecord, localUrl: string) => void;
   onReupload: (film: FilmRecord, localUrl: string) => void;
-  onNewUpload: (file: File) => void;
+  onUploadClick: () => void;
 }
 
 function formatDate(iso: string) {
@@ -24,14 +23,8 @@ function formatDuration(seconds?: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNewUpload }: Props) {
-  const uploadRef = useRef<HTMLInputElement>(null);
+export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUploadClick }: Props) {
   const reuploadRefs = useRef<Map<string, HTMLInputElement>>(new Map());
-
-  function handleNewFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) onNewUpload(file);
-  }
 
   function handleReuploadFile(film: FilmRecord, e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -55,7 +48,7 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
             <p className="text-white font-semibold text-lg">No film uploaded yet</p>
             <p className="text-slate-500 text-sm max-w-xs">Upload your first practice video to start analyzing plays and tracking players.</p>
             <button
-              onClick={() => uploadRef.current?.click()}
+              onClick={onUploadClick}
               className="mt-2 px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-80"
               style={{ background: "var(--ppu-orange)" }}
             >
@@ -67,17 +60,10 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Upload card */}
           <button
-            onClick={() => uploadRef.current?.click()}
+            onClick={onUploadClick}
             className="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-all hover:border-orange-500 hover:bg-orange-500/5 cursor-pointer"
             style={{ borderColor: "var(--ppu-border)", minHeight: "160px" }}
           >
-            <input
-              ref={uploadRef}
-              type="file"
-              accept={ACCEPTED_FORMATS.join(",")}
-              className="hidden"
-              onChange={handleNewFile}
-            />
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center"
               style={{ background: "var(--ppu-orange-dim)" }}

@@ -13,11 +13,11 @@ const STORAGE_KEY = "volleyball-films";
 const API_BASE = "http://localhost:8000";
 
 const MOCK_PLAYS: Play[] = [
-  { id: "1", label: "Serve",  timestamp: 4  },
-  { id: "2", label: "Dig",   timestamp: 11 },
-  { id: "3", label: "Set",   timestamp: 18 },
-  { id: "4", label: "Spike", timestamp: 24 },
-  { id: "5", label: "Block", timestamp: 31 },
+  { id: "1", label: "Serve",  timestamp: 4,  start_time_sec: 4,  end_time_sec: 6  },
+  { id: "2", label: "Dig",   timestamp: 11, start_time_sec: 11, end_time_sec: 13 },
+  { id: "3", label: "Set",   timestamp: 18, start_time_sec: 18, end_time_sec: 20 },
+  { id: "4", label: "Spike", timestamp: 24, start_time_sec: 24, end_time_sec: 26 },
+  { id: "5", label: "Block", timestamp: 31, start_time_sec: 31, end_time_sec: 33 },
 ];
 
 const MOCK_PLAYERS: TrackedPlayer[] = [
@@ -100,7 +100,7 @@ export default function Home() {
 
     try {
       // Step 1 (Yoshi): run YOLO detection on the uploaded video
-      await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`);
+      await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`, { method: "POST" });
 
       // Step 2 (Josh): fetch play recognition results
       const res = await fetch(`${API_BASE}/results/${encodeURIComponent(film.filename)}`);
@@ -138,13 +138,7 @@ export default function Home() {
     openReview(film, localUrl);
   }
 
-  function handleNewUploadFile(file: File) {
-    // Go to upload screen but pre-load the file
-    const localUrl = URL.createObjectURL(file);
-    handleUploadComplete({ gcs_uri: "", filename: file.name }, localUrl);
-  }
-
-  function handleSeek(time: number) {
+function handleSeek(time: number) {
     playerRef.current?.seek(time);
   }
 
@@ -177,7 +171,7 @@ export default function Home() {
           localUrls={localUrls}
           onOpen={(film, url) => openReview(film, url)}
           onReupload={(film, url) => { localUrls.set(film.id, url); openReview(film, url); }}
-          onNewUpload={handleNewUploadFile}
+          onUploadClick={() => setScreen("upload")}
         />
       </div>
     );
