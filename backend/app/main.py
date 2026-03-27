@@ -1,16 +1,30 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import os
 import tempfile
 import sys
 from pathlib import Path
+from typing import Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.gcs import upload_to_gcs
+from utils.detection import detect_in_video
+from utils.play_recognition import recognize_plays
 
 app = FastAPI(title="Volleyball AI Platform")
+
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -72,21 +86,73 @@ async def upload_video(file: UploadFile = File(...)):
 @app.post("/detect")
 async def detect_plays(gcs_uri: str):
     """
-    Placeholder for YOLO detection endpoint.
+    Run YOLO detection on a video stored in GCS.
 
     Args:
         gcs_uri: GCS URI of the video to process
 
     Returns:
-        Detection results (coordinates, play types, etc.)
+        Detection results with player counts and annotated video
     """
+    try:
+        results = detect_in_video(gcs_uri)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "Detection completed",
+                "gcs_uri": gcs_uri,
+                **results,
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# In-memory results store  { video_id: { "detections": ..., "plays": ... } }
+# ---------------------------------------------------------------------------
+results_store: dict[str, dict[str, Any]] = {}
+
+
+class DetectionResult(BaseModel):
+    video_id: str
+    gcs_uri: str
+    fps: float = 30.0
+    frame_count: int = 0
+    detections: list[dict[str, Any]] = []
+
+
+@app.post("/store-results")
+async def store_results(detection: DetectionResult):
+    plays = recognize_plays(detection.detections, detection.fps)
+    results_store[detection.video_id] = {
+        "detections": detection.model_dump(),
+        "plays": plays,
+    }
     return {
-        "message": "Detection endpoint - coming soon",
-        "gcs_uri": gcs_uri,
+        "message": "Results stored and plays recognized",
+        "video_id": detection.video_id,
+        "play_summary": {p["play"]: 1 for p in plays.get("plays", [])},
+    }
+
+
+@app.get("/results/{video_id}")
+async def get_results(video_id: str):
+    if video_id not in results_store:
+        raise HTTPException(status_code=404, detail="Results not found")
+    return results_store[video_id]
+
+
+@app.get("/results")
+async def list_results():
+    return {
+        "processed_videos": [
+            {"video_id": vid, "play_summary": data.get("plays", {}).get("summary", {})}
+            for vid, data in results_store.items()
+        ]
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
