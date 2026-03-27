@@ -103,7 +103,7 @@ export default function Home() {
       const detectRes = await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`, { method: "POST" });
       const detectData = detectRes.ok ? await detectRes.json() : null;
 
-      // Step 2: read plays directly from detect response (recognition runs inside detect)
+      // Step 2: read plays + per-frame player positions from detect response
       if (detectData?.play_recognition?.plays) {
         const mapped: Play[] = (detectData.play_recognition.plays as { play: string; start_time_sec: number; end_time_sec: number }[]).map((p, i) => ({
           id: String(i),
@@ -113,6 +113,26 @@ export default function Home() {
           end_time_sec: p.end_time_sec,
         }));
         setPlays(mapped);
+      }
+
+      if (detectData?.frames_detections) {
+        const vw: number = detectData.video_width ?? 1920;
+        const vh: number = detectData.video_height ?? 1080;
+        const frames: DetectionFrame[] = (detectData.frames_detections as { frame: number; timestamp_sec: number; objects: { label: string; confidence: number; bbox: number[] }[] }[]).map((f) => ({
+          frame: f.frame,
+          timestamp: f.timestamp_sec,
+          players: f.objects
+            .filter((o) => o.label === "player")
+            .sort((a, b) => b.confidence - a.confidence)
+            .slice(0, 14)
+            .map((o, i) => ({
+              id: `p${i}`,
+              x: ((o.bbox[0] + o.bbox[2]) / 2) / vw,
+              y: ((o.bbox[1] + o.bbox[3]) / 2) / vh,
+              confidence: o.confidence,
+            })),
+        }));
+        setDetectionFrames(frames);
       }
 
       // Step 3: store results for /search endpoint

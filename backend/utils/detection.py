@@ -78,7 +78,7 @@ def detect_in_video(gcs_uri: str) -> dict:
                 person_detections = [box for box in pretrained_boxes if int(box.cls) == 0]
 
                 # Use TRAINED model for ball detection (trained class 0 = Ball)
-                trained_results = trained_model(frame, verbose=False, conf=0.15)
+                trained_results = trained_model(frame, verbose=False, conf=0.05)
                 trained_boxes = trained_results[0].boxes
                 ball_detections = []
                 for box in trained_boxes:
@@ -172,6 +172,9 @@ def detect_in_video(gcs_uri: str) -> dict:
 
         detections_stats["annotated_video_uri"] = annotated_gcs_uri
         detections_stats["processed_frames"] = processed_frames
+        detections_stats["video_width"] = width
+        detections_stats["video_height"] = height
+        detections_stats["frames_detections"] = frames_detections
         # Return FULL play recognition (segments with timestamps + summary)
         detections_stats["play_recognition"] = play_recognition_result
         detections_stats["play_summary"] = play_recognition_result.get("summary", {})

@@ -14,9 +14,11 @@ export interface DetectionFrame {
   players: TrackedPlayer[];
 }
 
-// Yoshi — update fields when detection schema is finalized
 export interface TrackedPlayer {
   id: string;
+  x: number;          // normalized 0-1 (horizontal position in frame)
+  y: number;          // normalized 0-1 (vertical position in frame)
+  confidence: number;
   [key: string]: unknown;
 }
 
