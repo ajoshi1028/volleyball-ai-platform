@@ -37,3 +37,12 @@ export interface Play {
   start_time_sec: number;
   end_time_sec: number;
 }
+
+// Detection and Play Recognition result types
+export interface DetectionResult {
+  [key: string]: unknown;
+}
+
+export interface PlayResult {
+  [key: string]: unknown;
+}
