@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { FilmRecord } from "../types";
 
 const ACCEPTED_FORMATS = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"];
@@ -9,7 +9,8 @@ interface Props {
   localUrls: Map<string, string>;
   onOpen: (film: FilmRecord, localUrl: string) => void;
   onReupload: (film: FilmRecord, localUrl: string) => void;
-  onUploadClick: () => void;
+  onUploadClick?: () => void;
+  onNewUpload?: (file: File) => void;
 }
 
 function formatDate(iso: string) {
@@ -23,8 +24,9 @@ function formatDuration(seconds?: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUploadClick }: Props) {
+export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUploadClick, onNewUpload }: Props) {
   const reuploadRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const [dragActive, setDragActive] = useState(false);
 
   function handleReuploadFile(film: FilmRecord, e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -33,8 +35,42 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUp
     onReupload(film, localUrl);
   }
 
+  function handleDrag(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      const videoMimeTypes = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"];
+      if (videoMimeTypes.includes(file.type) || file.name.match(/\.(mp4|mov|avi|mkv)$/i)) {
+        onNewUpload?.(file);
+      }
+    }
+  }
+
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-8" style={{ background: "var(--ppu-navy)" }}>
+    <div
+      className="flex-1 overflow-y-auto px-8 py-8 transition-colors"
+      style={{
+        background: dragActive ? "var(--ppu-orange-dim)" : "var(--ppu-navy)",
+      }}
+      onDragEnter={handleDrag}
+      onDragLeave={handleDrag}
+      onDragOver={handleDrag}
+      onDrop={handleDrop}
+    >
       <div className="max-w-5xl mx-auto">
         <h2 className="text-lg font-semibold text-white mb-6">Film Library</h2>
 
