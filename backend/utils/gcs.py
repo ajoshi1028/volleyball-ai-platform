@@ -2,40 +2,47 @@ import os
 from google.cloud import storage
 
 BUCKET_NAME = "pepperdine-volleyball-2026"
-CREDENTIALS_PATH = os.path.expanduser("~/.volleyball-backend-key.json")
+
+# Support both env var and hardcoded path
+CREDENTIALS_PATH = os.environ.get(
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    os.path.expanduser("~/.volleyball-backend-key.json"),
+)
+
+
+def _get_client():
+    """Create a GCS client with proper credentials."""
+    if not os.path.exists(CREDENTIALS_PATH):
+        raise FileNotFoundError(
+            f"GCS credentials not found at {CREDENTIALS_PATH}. "
+            "Set GOOGLE_APPLICATION_CREDENTIALS env var or place the key file at ~/.volleyball-backend-key.json"
+        )
+    return storage.Client.from_service_account_json(CREDENTIALS_PATH)
 
 
 def upload_to_gcs(local_file_path: str, destination_blob_name: str) -> str:
     """
     Upload a file to Google Cloud Storage.
 
-    Args:
-        local_file_path: Path to the local file
-        destination_blob_name: Path in GCS bucket (e.g., "raw-videos/practice1.mp4")
-
     Returns:
         GCS URI (e.g., "gs://pepperdine-volleyball-2026/raw-videos/practice1.mp4")
     """
-    client = storage.Client.from_service_account_json(CREDENTIALS_PATH)
+    client = _get_client()
     bucket = client.bucket(BUCKET_NAME)
     blob = bucket.blob(destination_blob_name)
-
     blob.upload_from_filename(local_file_path)
-
-    gcs_uri = f"gs://{BUCKET_NAME}/{destination_blob_name}"
-    return gcs_uri
+    return f"gs://{BUCKET_NAME}/{destination_blob_name}"
 
 
-def download_from_gcs(destination_blob_name: str, local_file_path: str) -> None:
+def download_from_gcs(blob_name: str, local_file_path: str) -> None:
     """
     Download a file from Google Cloud Storage.
-
-    Args:
-        destination_blob_name: Path in GCS bucket (e.g., "raw-videos/practice1.mp4")
-        local_file_path: Where to save the file locally
     """
-    client = storage.Client.from_service_account_json(CREDENTIALS_PATH)
+    client = _get_client()
     bucket = client.bucket(BUCKET_NAME)
-    blob = bucket.blob(destination_blob_name)
+    blob = bucket.blob(blob_name)
+
+    if not blob.exists():
+        raise FileNotFoundError(f"Blob '{blob_name}' not found in bucket '{BUCKET_NAME}'")
 
     blob.download_to_filename(local_file_path)

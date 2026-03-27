@@ -12,7 +12,15 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.gcs import upload_to_gcs
-from utils.detection import detect_in_video
+# Lazy import to avoid model loading at startup
+_detect_fn = None
+
+def _get_detect_fn():
+    global _detect_fn
+    if _detect_fn is None:
+        from utils.detection import detect_in_video
+        _detect_fn = detect_in_video
+    return _detect_fn
 
 app = FastAPI(title="Volleyball AI Platform")
 
@@ -94,7 +102,13 @@ async def detect_plays(gcs_uri: str):
         Detection results with player counts and annotated video
     """
     try:
+        detect_in_video = _get_detect_fn()
         results = detect_in_video(gcs_uri)
+
+        # Check if detection returned an error
+        if "error" in results:
+            raise HTTPException(status_code=500, detail=results["error"])
+
         return JSONResponse(
             status_code=200,
             content={
@@ -103,6 +117,8 @@ async def detect_plays(gcs_uri: str):
                 **results,
             },
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
