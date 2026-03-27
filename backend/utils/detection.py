@@ -15,10 +15,10 @@ _trained_model = None
 def _get_pretrained_model():
     global _pretrained_model
     if _pretrained_model is None:
-        model_path = Path(__file__).parent.parent / "yolov8m.pt"
+        model_path = Path(__file__).parent.parent / "yolo11m.pt"
         if not model_path.exists():
             # YOLO will auto-download if not found
-            _pretrained_model = YOLO("yolov8m.pt")
+            _pretrained_model = YOLO("yolo11m.pt")
         else:
             _pretrained_model = YOLO(str(model_path))
     return _pretrained_model
