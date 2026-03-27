@@ -12,8 +12,8 @@ from utils.gcs import download_from_gcs, upload_to_gcs
 from utils.play_recognition import PlayRecognizer
 from collections import defaultdict
 
-# Load YOLOv8 model (medium for better accuracy)
-model = YOLO('yolov8m.pt')
+# Load trained YOLOv8m model (fine-tuned on 110 volleyball frames)
+model = YOLO('volleyball_trained.pt')
 
 def detect_in_video(gcs_uri: str) -> dict:
     """
