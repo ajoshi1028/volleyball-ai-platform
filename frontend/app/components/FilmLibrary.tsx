@@ -59,8 +59,10 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const file = files[0];
-      const videoMimeTypes = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"];
-      if (videoMimeTypes.includes(file.type) || file.name.match(/\.(mp4|mov|avi|mkv)$/i)) {
+      if (
+        ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"].includes(file.type) ||
+        file.name.match(/\.(mp4|mov|avi|mkv)$/i)
+      ) {
         onNewUpload(file);
       }
     }
@@ -70,7 +72,7 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
     <div
       className="flex-1 overflow-y-auto px-8 py-8 transition-colors"
       style={{
-        background: dragActive ? "var(--ppu-orange-dim)" : "var(--ppu-navy)",
+        background: dragActive ? "rgba(255,99,0,0.08)" : "var(--ppu-navy)",
       }}
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
@@ -81,14 +83,14 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
         <h2 className="text-lg font-semibold text-white mb-6">Film Library</h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Upload card */}
+          {/* Upload card — always first in the grid */}
           <button
             onClick={() => uploadRef.current?.click()}
             className="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-all cursor-pointer"
             style={{
               borderColor: dragActive ? "var(--ppu-orange)" : "var(--ppu-border)",
-              background: dragActive ? "var(--ppu-orange-dim)" : "var(--ppu-panel)",
-              minHeight: "160px",
+              background: dragActive ? "rgba(255,99,0,0.08)" : "var(--ppu-panel)",
+              minHeight: "200px",
             }}
           >
             <input
@@ -99,10 +101,10 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
               onChange={handleNewFile}
             />
             <div
-              className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{ background: "var(--ppu-orange-dim)" }}
+              className="w-12 h-12 rounded-full flex items-center justify-center"
+              style={{ background: "rgba(255,99,0,0.15)" }}
             >
-              <svg className="w-5 h-5" style={{ color: "var(--ppu-orange)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-6 h-6" style={{ color: "var(--ppu-orange)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
             </div>
@@ -120,14 +122,22 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
                 style={{ background: "var(--ppu-panel)", borderColor: "var(--ppu-border)" }}
               >
                 {/* Thumbnail */}
-                <div className="relative h-28 overflow-hidden" style={{ background: "var(--ppu-card)" }}>
+                <div className="relative h-32 overflow-hidden" style={{ background: "var(--ppu-card)" }}>
                   {film.thumbnail ? (
                     <img src={film.thumbnail} alt={film.filename} className="w-full h-full object-cover" />
                   ) : (
                     <div className="flex items-center justify-center h-full">
-                      <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-10 h-10 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.069A1 1 0 0121 8.845v6.31a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
                       </svg>
+                    </div>
+                  )}
+
+                  {/* GCS badge */}
+                  {film.gcs_uri && (
+                    <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                      style={{ background: 'rgba(0,0,0,0.6)', color: '#4ade80' }}>
+                      Cloud
                     </div>
                   )}
                 </div>
@@ -148,15 +158,15 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
                   {hasLocalUrl ? (
                     <button
                       onClick={() => onOpen(film, localUrls.get(film.id)!)}
-                      className="mt-1 w-full py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-80"
+                      className="mt-1 w-full py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-80"
                       style={{ background: "var(--ppu-orange)" }}
                     >
                       Open
                     </button>
                   ) : (
                     <label
-                      className="mt-1 w-full py-1.5 rounded-lg text-xs font-semibold text-center cursor-pointer transition-colors border"
-                      style={{ color: "var(--ppu-orange)", borderColor: "rgba(255,99,0,0.3)", background: "var(--ppu-orange-dim)" }}
+                      className="mt-1 w-full py-2 rounded-lg text-xs font-semibold text-center cursor-pointer transition-colors border block"
+                      style={{ color: "var(--ppu-orange)", borderColor: "rgba(255,99,0,0.3)", background: "rgba(255,99,0,0.1)" }}
                     >
                       Re-upload to view
                       <input

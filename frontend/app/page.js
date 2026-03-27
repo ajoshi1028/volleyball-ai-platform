@@ -3,30 +3,12 @@
 import { useRef, useState, useEffect } from 'react'
 import Nav from './components/Nav'
 import FilmLibrary from './components/FilmLibrary'
-import VideoUploader from './components/VideoUploader'
 import VideoPlayer from './components/VideoPlayer'
 import PlayerTrackingPanel from './components/PlayerTrackingPanel'
 import PlayTimeline from './components/PlayTimeline'
 
 const STORAGE_KEY = 'volleyball-films'
 const API_BASE = 'http://localhost:8000'
-
-const MOCK_PLAYS = [
-  { id: '1', label: 'Serve', timestamp: 4 },
-  { id: '2', label: 'Dig', timestamp: 11 },
-  { id: '3', label: 'Set', timestamp: 18 },
-  { id: '4', label: 'Spike', timestamp: 24 },
-  { id: '5', label: 'Block', timestamp: 31 },
-]
-
-const MOCK_PLAYERS = [
-  { id: 'p1', jersey: 3, position: 'OH', x: 0.24, y: 0.61 },
-  { id: 'p2', jersey: 7, position: 'S', x: 0.51, y: 0.55 },
-  { id: 'p3', jersey: 11, position: 'MB', x: 0.38, y: 0.48 },
-  { id: 'p4', jersey: 14, position: 'L', x: 0.67, y: 0.72 },
-  { id: 'p5', jersey: 2, position: 'OH', x: 0.19, y: 0.43 },
-  { id: 'p6', jersey: 9, position: 'RS', x: 0.79, y: 0.51 },
-]
 
 function loadFilms() {
   try {
@@ -54,17 +36,17 @@ export default function Home() {
   const [currentTime, setCurrentTime] = useState(0)
   const [videoDuration, setVideoDuration] = useState(0)
   const [analyzing, setAnalyzing] = useState(false)
-  const [mockMode, setMockMode] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState('')  // '', 'uploading', 'detecting', 'done', 'error'
+  const [detectionStats, setDetectionStats] = useState(null)
+  const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
     setFilms(loadFilms())
   }, [])
 
-  const currentPlayers = mockMode
-    ? MOCK_PLAYERS
-    : detectionFrames.find((f) => Math.abs(f.timestamp - currentTime) < 0.1)?.players ?? []
-
-  const activePlays = mockMode ? MOCK_PLAYS : plays
+  const currentPlayers = detectionFrames.find(
+    (f) => Math.abs(f.timestamp - currentTime) < 0.1
+  )?.players ?? []
 
   // Save duration + thumbnail back to the film record once we have them
   useEffect(() => {
@@ -89,53 +71,131 @@ export default function Home() {
     })
   }
 
+  // ─── Upload + Detect pipeline ────────────────────────────────────
+  async function handleNewUploadFile(file) {
+    const localUrl = URL.createObjectURL(file)
+
+    // Step 1: Upload to GCS
+    setUploadProgress('uploading')
+    setErrorMsg('')
+
+    const form = new FormData()
+    form.append('file', file)
+
+    let gcsUri = ''
+    let filename = file.name
+
+    try {
+      const res = await fetch(`${API_BASE}/upload-video`, {
+        method: 'POST',
+        body: form,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `Upload failed: ${res.status}`)
+      }
+      const data = await res.json()
+      gcsUri = data.gcs_uri
+      filename = data.filename
+    } catch (err) {
+      console.error('Upload error:', err)
+      setErrorMsg(`Upload failed: ${err.message}`)
+      setUploadProgress('error')
+      // Still save locally so user can view the video
+      gcsUri = ''
+    }
+
+    // Create film record
+    const film = {
+      id: crypto.randomUUID(),
+      filename,
+      gcs_uri: gcsUri,
+      uploadedAt: new Date().toISOString(),
+    }
+    localUrls.set(film.id, localUrl)
+    setFilms((prev) => {
+      const updated = [film, ...prev]
+      saveFilms(updated)
+      return updated
+    })
+
+    // Open the review screen
+    openReview(film, localUrl)
+  }
+
   async function runDetection(film) {
     if (!film.gcs_uri) {
-      // No GCS URI (file was just uploaded locally), use mock data
-      setTimeout(() => setAnalyzing(false), 1500)
-      setPlays(MOCK_PLAYS)
+      // No GCS URI — can't run detection
+      setUploadProgress('done')
+      setAnalyzing(false)
+      setDetectionStats({ error: 'Video not uploaded to cloud. Detection requires GCS upload.' })
       return
     }
 
+    // Step 2: Run detection
+    setUploadProgress('detecting')
     try {
-      // Call backend detection endpoint
-      const detailsRes = await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`)
-      if (!detailsRes.ok) throw new Error('Detection failed')
+      const res = await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || `Detection failed: ${res.status}`)
+      }
 
-      const detectionData = await detailsRes.json()
-      console.log('Detection response:', detectionData)
+      const data = await res.json()
+      console.log('Detection response:', data)
 
-      // Extract plays from detection results
-      // Backend returns plays as: { video_id, fps, plays: [...segments], summary: {...} }
-      const playsData = detectionData.plays || {}
-      const playsArray = playsData.plays || []
+      // Save detection stats for display
+      setDetectionStats({
+        totalFrames: data.total_frames,
+        fps: data.fps,
+        resolution: data.resolution,
+        framesWithDetections: data.frames_with_detections,
+        maxPeopleInFrame: data.max_people_in_frame,
+        avgPeoplePerFrame: data.avg_people_per_detection_frame,
+        totalDetections: data.total_detections,
+        framesWithBall: data.frames_with_ball,
+        ballDetectionRate: data.ball_detection_rate,
+        processedFrames: data.processed_frames,
+        annotatedVideoUri: data.annotated_video_uri,
+        playSummary: data.play_summary || {},
+      })
 
-      const playsFromBackend = playsArray.map((play, idx) => ({
-        id: `${play.play}-${idx}`,
-        label: play.play ? play.play.charAt(0).toUpperCase() + play.play.slice(1) : 'Unknown',
-        timestamp: play.start_time_sec || 0,
-        start_time_sec: play.start_time_sec,
-        end_time_sec: play.end_time_sec,
+      // Extract plays with timestamps from play_recognition
+      const playRecognition = data.play_recognition || {}
+      const playSegments = playRecognition.plays || []
+
+      const playsForTimeline = playSegments.map((seg, idx) => ({
+        id: `${seg.play}-${idx}`,
+        label: seg.play.charAt(0).toUpperCase() + seg.play.slice(1),
+        timestamp: seg.start_time_sec,
+        start_time_sec: seg.start_time_sec,
+        end_time_sec: seg.end_time_sec,
       }))
 
-      console.log('Extracted plays:', playsFromBackend)
-      setPlays(playsFromBackend)
+      console.log('Play segments:', playsForTimeline)
+      setPlays(playsForTimeline)
 
-      // Store results in backend
+      // Store results in backend for search
       await fetch(`${API_BASE}/store-results`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           video_id: film.id,
           gcs_uri: film.gcs_uri,
-          fps: detectionData.fps || 30,
-          frame_count: detectionData.total_frames || 0,
+          fps: data.fps || 30,
+          frame_count: data.total_frames || 0,
           detections: [],
         }),
-      })
+      }).catch(() => {}) // non-critical
+
+      setUploadProgress('done')
     } catch (err) {
       console.error('Detection error:', err)
-      setPlays(MOCK_PLAYS)
+      setErrorMsg(`Detection failed: ${err.message}`)
+      setUploadProgress('error')
+      setDetectionStats({ error: err.message })
     } finally {
       setAnalyzing(false)
     }
@@ -148,45 +208,11 @@ export default function Home() {
     setPlays([])
     setCurrentTime(0)
     setVideoDuration(0)
-    setMockMode(false)
     setAnalyzing(true)
+    setDetectionStats(null)
+    setErrorMsg('')
     setScreen('review')
-
-    // Run detection on the video
     runDetection(film)
-  }
-
-  async function handleUploadComplete(result, localUrl) {
-    const film = {
-      id: crypto.randomUUID(),
-      filename: result.filename,
-      gcs_uri: result.gcs_uri,
-      uploadedAt: new Date().toISOString(),
-    }
-    localUrls.set(film.id, localUrl)
-    setFilms((prev) => {
-      const updated = [film, ...prev]
-      saveFilms(updated)
-      return updated
-    })
-    openReview(film, localUrl)
-  }
-
-  async function handleNewUploadFile(file) {
-    // Upload to GCS first
-    const localUrl = URL.createObjectURL(file)
-    const form = new FormData()
-    form.append('file', file)
-
-    try {
-      const res = await fetch(`${API_BASE}/upload-video`, { method: 'POST', body: form })
-      if (!res.ok) throw new Error('Upload failed')
-      const result = await res.json()
-      handleUploadComplete(result, localUrl)
-    } catch (err) {
-      console.error('Upload error:', err)
-      alert('Failed to upload video. Please try again.')
-    }
   }
 
   function handleSeek(time) {
@@ -196,23 +222,12 @@ export default function Home() {
   function goToLibrary() {
     setScreen('library')
     setActiveFilm(null)
+    setUploadProgress('')
+    setDetectionStats(null)
+    setErrorMsg('')
   }
 
-  const mockToggle = (
-    <button
-      onClick={() => setMockMode((p) => !p)}
-      className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-all"
-      style={
-        mockMode
-          ? { background: 'var(--ppu-orange-dim)', color: 'var(--ppu-orange)', borderColor: 'rgba(255,99,0,0.4)' }
-          : { background: 'transparent', color: '#64748b', borderColor: 'var(--ppu-border)' }
-      }
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${mockMode ? 'bg-orange-500' : 'bg-slate-600'}`} />
-      Mock data {mockMode ? 'on' : 'off'}
-    </button>
-  )
-
+  // ─── Library screen ──────────────────────────────────────────────
   if (screen === 'library') {
     return (
       <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--ppu-navy)' }}>
@@ -231,21 +246,16 @@ export default function Home() {
     )
   }
 
-  if (screen === 'upload') {
-    return (
-      <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--ppu-navy)' }}>
-        <Nav onBackToLibrary={goToLibrary} />
-        <VideoUploader onUploadComplete={handleUploadComplete} />
-      </div>
-    )
-  }
-
-  // Review screen
+  // ─── Review screen ───────────────────────────────────────────────
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--ppu-navy)' }}>
-      <Nav currentFilm={activeFilm?.filename} onBackToLibrary={goToLibrary} rightSlot={mockToggle} />
+      <Nav currentFilm={activeFilm?.filename} onBackToLibrary={goToLibrary} />
+
       <div className="flex flex-1 overflow-hidden">
+        {/* Left: Video + Timeline + Stats */}
         <div className="flex flex-col flex-1 overflow-hidden">
+
+          {/* Video player */}
           <div className="flex-1 overflow-hidden">
             <VideoPlayer
               ref={playerRef}
@@ -257,13 +267,69 @@ export default function Home() {
               onThumbnail={handleThumbnail}
             />
           </div>
+
+          {/* Play timeline */}
           <PlayTimeline
-            plays={activePlays}
+            plays={plays}
             duration={videoDuration}
             analyzing={analyzing}
             onSeek={handleSeek}
           />
+
+          {/* Detection stats bar */}
+          {detectionStats && !detectionStats.error && (
+            <div
+              className="border-t px-4 py-3 overflow-x-auto"
+              style={{ background: 'var(--ppu-panel)', borderColor: 'var(--ppu-border)' }}
+            >
+              <div className="flex gap-6 text-xs">
+                <StatItem label="Players Detected" value={detectionStats.totalDetections} />
+                <StatItem label="Max in Frame" value={detectionStats.maxPeopleInFrame} />
+                <StatItem label="Avg per Frame" value={detectionStats.avgPeoplePerFrame} />
+                <StatItem label="Ball Detection" value={`${detectionStats.ballDetectionRate}%`} />
+                <StatItem label="Frames Analyzed" value={detectionStats.processedFrames} />
+                <StatItem label="Resolution" value={detectionStats.resolution} />
+                {Object.entries(detectionStats.playSummary || {}).map(([play, count]) => (
+                  <StatItem
+                    key={play}
+                    label={play.charAt(0).toUpperCase() + play.slice(1) + 's'}
+                    value={count}
+                    highlight
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Upload/Detection progress or error */}
+          {(uploadProgress === 'uploading' || uploadProgress === 'detecting') && (
+            <div
+              className="border-t px-4 py-2.5 flex items-center gap-3"
+              style={{ background: 'var(--ppu-panel)', borderColor: 'var(--ppu-border)' }}
+            >
+              <div
+                className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+                style={{ borderColor: 'var(--ppu-orange)', borderTopColor: 'transparent' }}
+              />
+              <span className="text-xs" style={{ color: 'var(--ppu-orange)' }}>
+                {uploadProgress === 'uploading'
+                  ? 'Uploading video to cloud storage...'
+                  : 'Running AI detection (this may take a minute)...'}
+              </span>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div
+              className="border-t px-4 py-2.5 flex items-center gap-2"
+              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)' }}
+            >
+              <span className="text-xs text-red-400">{errorMsg}</span>
+            </div>
+          )}
         </div>
+
+        {/* Right: Player tracking panel */}
         <div className="w-64 shrink-0">
           <PlayerTrackingPanel
             players={currentPlayers}
@@ -272,6 +338,21 @@ export default function Home() {
           />
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Stat display component ──────────────────────────────────────
+function StatItem({ label, value, highlight }) {
+  return (
+    <div className="flex flex-col gap-0.5 shrink-0">
+      <span className="text-slate-500 whitespace-nowrap">{label}</span>
+      <span
+        className="font-semibold tabular-nums"
+        style={{ color: highlight ? 'var(--ppu-orange)' : '#e2e8f0' }}
+      >
+        {value}
+      </span>
     </div>
   )
 }

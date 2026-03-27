@@ -156,9 +156,6 @@ def detect_in_video(gcs_uri: str) -> dict:
             "detections": frames_detections
         })
 
-        # Extract play counts from recognition result
-        plays_dict = play_recognition_result.get("summary", {})
-
         # Upload annotated video
         annotated_gcs_uri = upload_to_gcs(
             str(output_path),
@@ -167,6 +164,8 @@ def detect_in_video(gcs_uri: str) -> dict:
 
         detections_stats["annotated_video_uri"] = annotated_gcs_uri
         detections_stats["processed_frames"] = processed_frames
-        detections_stats["plays"] = plays_dict
+        # Return FULL play recognition (segments with timestamps + summary)
+        detections_stats["play_recognition"] = play_recognition_result
+        detections_stats["play_summary"] = play_recognition_result.get("summary", {})
 
         return detections_stats
