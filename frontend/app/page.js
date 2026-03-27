@@ -74,42 +74,13 @@ export default function Home() {
   // ─── Upload + Detect pipeline ────────────────────────────────────
   async function handleNewUploadFile(file) {
     const localUrl = URL.createObjectURL(file)
+    const filename = file.name
 
-    // Step 1: Upload to GCS
-    setUploadProgress('uploading')
-    setErrorMsg('')
-
-    const form = new FormData()
-    form.append('file', file)
-
-    let gcsUri = ''
-    let filename = file.name
-
-    try {
-      const res = await fetch(`${API_BASE}/upload-video`, {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || `Upload failed: ${res.status}`)
-      }
-      const data = await res.json()
-      gcsUri = data.gcs_uri
-      filename = data.filename
-    } catch (err) {
-      console.error('Upload error:', err)
-      setErrorMsg(`Upload failed: ${err.message}`)
-      setUploadProgress('error')
-      // Still save locally so user can view the video
-      gcsUri = ''
-    }
-
-    // Create film record
+    // Create film record IMMEDIATELY so user sees something
     const film = {
       id: crypto.randomUUID(),
       filename,
-      gcs_uri: gcsUri,
+      gcs_uri: '',  // Will be filled after upload
       uploadedAt: new Date().toISOString(),
     }
     localUrls.set(film.id, localUrl)
@@ -119,8 +90,51 @@ export default function Home() {
       return updated
     })
 
-    // Open the review screen
-    openReview(film, localUrl)
+    // Switch to review screen RIGHT AWAY — show the video immediately
+    setActiveFilm(film)
+    setLocalVideoUrl(localUrl)
+    setDetectionFrames([])
+    setPlays([])
+    setCurrentTime(0)
+    setVideoDuration(0)
+    setAnalyzing(true)
+    setDetectionStats(null)
+    setErrorMsg('')
+    setUploadProgress('uploading')
+    setScreen('review')
+
+    // Now upload to GCS in the background
+    const form = new FormData()
+    form.append('file', file)
+
+    try {
+      const uploadRes = await fetch(`${API_BASE}/upload-video`, {
+        method: 'POST',
+        body: form,
+      })
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({}))
+        throw new Error(err.detail || `Upload failed: ${uploadRes.status}`)
+      }
+      const uploadData = await uploadRes.json()
+
+      // Update film with GCS URI
+      film.gcs_uri = uploadData.gcs_uri
+      setActiveFilm({ ...film })
+      setFilms((prev) => {
+        const updated = prev.map((f) => f.id === film.id ? { ...film } : f)
+        saveFilms(updated)
+        return updated
+      })
+
+      // Now run detection
+      await runDetection(film)
+    } catch (err) {
+      console.error('Upload error:', err)
+      setErrorMsg(`Upload failed: ${err.message}`)
+      setUploadProgress('error')
+      setAnalyzing(false)
+    }
   }
 
   async function runDetection(film) {
