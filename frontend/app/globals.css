@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   --ppu-navy: #0f1923;
@@ -7,11 +9,6 @@
   --ppu-border: #2e3d52;
   --ppu-orange: #ff6300;
   --ppu-orange-dim: rgba(255, 99, 0, 0.15);
-}
-
-@theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
 body {

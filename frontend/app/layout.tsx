@@ -1,14 +1,5 @@
-import './globals.css'
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import type { Metadata } from "next";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Pepperdine Film Analysis",
@@ -17,15 +8,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: {
-  children: React.ReactNode
-}) {
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col" style={{ background: "#0f1923", color: "#e2e8f0" }}>{children}</body>
+    <html lang="en" className="h-full antialiased">
+      <body className="min-h-full flex flex-col" style={{ background: "#0f1923", color: "#e2e8f0" }}>
+        {children}
+      </body>
     </html>
-  )
+  );
 }

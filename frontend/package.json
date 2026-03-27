@@ -14,9 +14,13 @@
     "react-dom": "^18"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "25.5.0",
     "@types/react": "19.2.14",
+    "autoprefixer": "^10.4.27",
     "eslint": "^8",
-    "eslint-config-next": "^14"
+    "eslint-config-next": "^14",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2"
   }
 }

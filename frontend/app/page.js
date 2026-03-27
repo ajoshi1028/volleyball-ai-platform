@@ -1,44 +1,214 @@
 'use client'
 
-import { useState } from 'react'
-import UploadForm from '@/components/UploadForm'
-import VideoResults from '@/components/VideoResults'
+import { useRef, useState, useEffect } from 'react'
+import Nav from './components/Nav'
+import FilmLibrary from './components/FilmLibrary'
+import VideoUploader from './components/VideoUploader'
+import VideoPlayer from './components/VideoPlayer'
+import PlayerTrackingPanel from './components/PlayerTrackingPanel'
+import PlayTimeline from './components/PlayTimeline'
+
+const STORAGE_KEY = 'volleyball-films'
+
+const MOCK_PLAYS = [
+  { id: '1', label: 'Serve', timestamp: 4 },
+  { id: '2', label: 'Dig', timestamp: 11 },
+  { id: '3', label: 'Set', timestamp: 18 },
+  { id: '4', label: 'Spike', timestamp: 24 },
+  { id: '5', label: 'Block', timestamp: 31 },
+]
+
+const MOCK_PLAYERS = [
+  { id: 'p1', jersey: 3, position: 'OH', x: 0.24, y: 0.61 },
+  { id: 'p2', jersey: 7, position: 'S', x: 0.51, y: 0.55 },
+  { id: 'p3', jersey: 11, position: 'MB', x: 0.38, y: 0.48 },
+  { id: 'p4', jersey: 14, position: 'L', x: 0.67, y: 0.72 },
+  { id: 'p5', jersey: 2, position: 'OH', x: 0.19, y: 0.43 },
+  { id: 'p6', jersey: 9, position: 'RS', x: 0.79, y: 0.51 },
+]
+
+function loadFilms() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+  } catch {
+    return []
+  }
+}
+
+function saveFilms(films) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(films))
+}
 
 export default function Home() {
-  const [videos, setVideos] = useState([])
+  const playerRef = useRef(null)
 
-  const handleVideoUploaded = (videoData) => {
-    setVideos([...videos, videoData])
+  const [screen, setScreen] = useState('library')
+  const [films, setFilms] = useState([])
+  const [localUrls] = useState(() => new Map())
+
+  const [activeFilm, setActiveFilm] = useState(null)
+  const [localVideoUrl, setLocalVideoUrl] = useState('')
+  const [detectionFrames, setDetectionFrames] = useState([])
+  const [plays, setPlays] = useState([])
+  const [currentTime, setCurrentTime] = useState(0)
+  const [videoDuration, setVideoDuration] = useState(0)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [mockMode, setMockMode] = useState(false)
+
+  useEffect(() => {
+    setFilms(loadFilms())
+  }, [])
+
+  const currentPlayers = mockMode
+    ? MOCK_PLAYERS
+    : detectionFrames.find((f) => Math.abs(f.timestamp - currentTime) < 0.1)?.players ?? []
+
+  const activePlays = mockMode ? MOCK_PLAYS : plays
+
+  // Save duration + thumbnail back to the film record once we have them
+  useEffect(() => {
+    if (!activeFilm || !videoDuration) return
+    setFilms((prev) => {
+      const updated = prev.map((f) =>
+        f.id === activeFilm.id ? { ...f, duration: videoDuration } : f
+      )
+      saveFilms(updated)
+      return updated
+    })
+  }, [videoDuration, activeFilm])
+
+  function handleThumbnail(dataUrl) {
+    if (!activeFilm) return
+    setFilms((prev) => {
+      const updated = prev.map((f) =>
+        f.id === activeFilm.id ? { ...f, thumbnail: dataUrl } : f
+      )
+      saveFilms(updated)
+      return updated
+    })
   }
 
+  function openReview(film, localUrl) {
+    setActiveFilm(film)
+    setLocalVideoUrl(localUrl)
+    setDetectionFrames([])
+    setPlays([])
+    setCurrentTime(0)
+    setVideoDuration(0)
+    setMockMode(false)
+    setAnalyzing(true)
+    setScreen('review')
+
+    // TODO (Yoshi): replace with real /detect call
+    // TODO (Josh): replace with real /results call
+    setTimeout(() => setAnalyzing(false), 3000)
+  }
+
+  async function handleUploadComplete(result, localUrl) {
+    const film = {
+      id: crypto.randomUUID(),
+      filename: result.filename,
+      gcs_uri: result.gcs_uri,
+      uploadedAt: new Date().toISOString(),
+    }
+    localUrls.set(film.id, localUrl)
+    setFilms((prev) => {
+      const updated = [film, ...prev]
+      saveFilms(updated)
+      return updated
+    })
+    openReview(film, localUrl)
+  }
+
+  function handleNewUploadFile(file) {
+    // Go to upload screen but pre-load the file
+    const localUrl = URL.createObjectURL(file)
+    handleUploadComplete({ gcs_uri: '', filename: file.name }, localUrl)
+  }
+
+  function handleSeek(time) {
+    playerRef.current?.seek(time)
+  }
+
+  function goToLibrary() {
+    setScreen('library')
+    setActiveFilm(null)
+  }
+
+  const mockToggle = (
+    <button
+      onClick={() => setMockMode((p) => !p)}
+      className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-all"
+      style={
+        mockMode
+          ? { background: 'var(--ppu-orange-dim)', color: 'var(--ppu-orange)', borderColor: 'rgba(255,99,0,0.4)' }
+          : { background: 'transparent', color: '#64748b', borderColor: 'var(--ppu-border)' }
+      }
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${mockMode ? 'bg-orange-500' : 'bg-slate-600'}`} />
+      Mock data {mockMode ? 'on' : 'off'}
+    </button>
+  )
+
+  if (screen === 'library') {
+    return (
+      <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--ppu-navy)' }}>
+        <Nav onBackToLibrary={goToLibrary} />
+        <FilmLibrary
+          films={films}
+          localUrls={localUrls}
+          onOpen={(film, url) => openReview(film, url)}
+          onReupload={(film, url) => {
+            localUrls.set(film.id, url)
+            openReview(film, url)
+          }}
+          onNewUpload={handleNewUploadFile}
+        />
+      </div>
+    )
+  }
+
+  if (screen === 'upload') {
+    return (
+      <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--ppu-navy)' }}>
+        <Nav onBackToLibrary={goToLibrary} />
+        <VideoUploader onUploadComplete={handleUploadComplete} />
+      </div>
+    )
+  }
+
+  // Review screen
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
-      <header style={{ textAlign: 'center', color: 'white', marginBottom: '40px' }}>
-        <h1 style={{ fontSize: '2.5em', marginBottom: '10px' }}>🏐 Volleyball AI Platform</h1>
-        <p style={{ fontSize: '1.1em' }}>Upload practice videos to analyze plays automatically</p>
-      </header>
-
-      <main>
-        <section style={{ background: 'white', padding: '40px', borderRadius: '12px', marginBottom: '40px' }}>
-          <h2>Upload Video</h2>
-          <UploadForm onVideoUploaded={handleVideoUploaded} />
-        </section>
-
-        {videos.length > 0 && (
-          <section style={{ background: 'white', padding: '40px', borderRadius: '12px' }}>
-            <h2>Uploaded Videos</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px', marginTop: '20px' }}>
-              {videos.map((video, idx) => (
-                <VideoResults key={idx} video={video} />
-              ))}
-            </div>
-          </section>
-        )}
-      </main>
-
-      <footer style={{ textAlign: 'center', color: 'white', padding: '20px', marginTop: '40px' }}>
-        <p>Pepperdine Volleyball AI Hackathon 2026</p>
-      </footer>
+    <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--ppu-navy)' }}>
+      <Nav currentFilm={activeFilm?.filename} onBackToLibrary={goToLibrary} rightSlot={mockToggle} />
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            <VideoPlayer
+              ref={playerRef}
+              src={localVideoUrl}
+              detections={detectionFrames}
+              analyzing={analyzing}
+              onTimeUpdate={setCurrentTime}
+              onDurationChange={setVideoDuration}
+              onThumbnail={handleThumbnail}
+            />
+          </div>
+          <PlayTimeline
+            plays={activePlays}
+            duration={videoDuration}
+            analyzing={analyzing}
+            onSeek={handleSeek}
+          />
+        </div>
+        <div className="w-64 shrink-0">
+          <PlayerTrackingPanel
+            players={currentPlayers}
+            currentTime={currentTime}
+            analyzing={analyzing}
+          />
+        </div>
+      </div>
     </div>
   )
 }
