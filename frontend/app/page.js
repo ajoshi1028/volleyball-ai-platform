@@ -103,15 +103,22 @@ export default function Home() {
       if (!detailsRes.ok) throw new Error('Detection failed')
 
       const detectionData = await detailsRes.json()
+      console.log('Detection response:', detectionData)
 
       // Extract plays from detection results
-      const playsFromBackend = Object.entries(detectionData.plays || {}).map(([type, count]) => ({
-        id: type,
-        label: type.charAt(0).toUpperCase() + type.slice(1),
-        count,
-        timestamp: 0,
+      // Backend returns plays as: { video_id, fps, plays: [...segments], summary: {...} }
+      const playsData = detectionData.plays || {}
+      const playsArray = playsData.plays || []
+
+      const playsFromBackend = playsArray.map((play, idx) => ({
+        id: `${play.play}-${idx}`,
+        label: play.play ? play.play.charAt(0).toUpperCase() + play.play.slice(1) : 'Unknown',
+        timestamp: play.start_time_sec || 0,
+        start_time_sec: play.start_time_sec,
+        end_time_sec: play.end_time_sec,
       }))
 
+      console.log('Extracted plays:', playsFromBackend)
       setPlays(playsFromBackend)
 
       // Store results in backend

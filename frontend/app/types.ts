@@ -32,10 +32,10 @@ export interface FilmRecord {
 // Josh — matches /results/{video_id} response shape
 export interface Play {
   id: string;
-  label: string;       // mapped from "play" field
-  timestamp: number;   // mapped from start_time_sec for seeking
-  start_time_sec: number;
-  end_time_sec: number;
+  label: string;                    // mapped from "play" field
+  timestamp: number;                // mapped from start_time_sec for seeking
+  start_time_sec?: number;
+  end_time_sec?: number;
 }
 
 // Detection and Play Recognition result types

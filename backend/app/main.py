@@ -133,19 +133,19 @@ class DetectionResult(BaseModel):
 
 def recognize_plays(detection_result: dict) -> dict:
     """
-    Extract play types from detection results.
+    Passthrough function for plays already recognized by detection.py.
 
-    Returns plays dict with play_type counts and summary
+    The actual play recognition with timestamps happens in detection.py.
+    This just returns the formatted result.
     """
-    plays = detection_result.get("plays", {})
+    plays_from_detection = detection_result.get("plays", {})
 
-    # Count plays
-    play_counts = plays if isinstance(plays, dict) else {}
+    if isinstance(plays_from_detection, dict) and "summary" in plays_from_detection:
+        # Already has proper structure from detection.py
+        return plays_from_detection
 
-    return {
-        "plays": [{"play": play_type, "count": count} for play_type, count in play_counts.items()],
-        "summary": play_counts,
-    }
+    # Fallback
+    return {"plays": [], "summary": {}}
 
 
 @app.post("/store-results")
