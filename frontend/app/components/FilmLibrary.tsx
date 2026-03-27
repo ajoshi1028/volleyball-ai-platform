@@ -80,25 +80,6 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNe
       <div className="max-w-5xl mx-auto">
         <h2 className="text-lg font-semibold text-white mb-6">Film Library</h2>
 
-        {films.length === 0 && (
-          <div className="flex flex-col items-center justify-center text-center py-24 gap-4">
-            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-2" style={{ background: "var(--ppu-card)" }}>
-              <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.069A1 1 0 0121 8.845v6.31a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
-              </svg>
-            </div>
-            <p className="text-white font-semibold text-lg">No film uploaded yet</p>
-            <p className="text-slate-500 text-sm max-w-xs">Upload your first practice video to start analyzing plays and tracking players.</p>
-            <button
-              onClick={() => uploadRef.current?.click()}
-              className="mt-2 px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-80"
-              style={{ background: "var(--ppu-orange)" }}
-            >
-              Upload Film
-            </button>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Upload card */}
           <button
