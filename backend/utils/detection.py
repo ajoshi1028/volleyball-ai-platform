@@ -12,8 +12,11 @@ from utils.gcs import download_from_gcs, upload_to_gcs
 from utils.play_recognition import recognize_plays
 from collections import defaultdict
 
-# Load trained YOLOv8m model (fine-tuned on 110 volleyball frames)
-model = YOLO('volleyball_trained.pt')
+# Load BOTH models:
+# - Pretrained YOLOv8m for reliable person detection (COCO classes)
+# - Custom-trained model for volleyball-specific ball detection
+pretrained_model = YOLO('yolov8m.pt')
+trained_model = YOLO('volleyball_trained.pt')
 
 def detect_in_video(gcs_uri: str) -> dict:
     """
@@ -69,22 +72,21 @@ def detect_in_video(gcs_uri: str) -> dict:
 
             # Process every 5th frame for speed
             if frame_count % 5 == 0:
-                # Run detection with lower confidence threshold for better ball detection
-                results = model(frame, verbose=False, conf=0.3)
+                # Use PRETRAINED model for person detection (COCO class 0 = person)
+                pretrained_results = pretrained_model(frame, verbose=False, conf=0.3)
+                pretrained_boxes = pretrained_results[0].boxes
+                person_detections = [box for box in pretrained_boxes if int(box.cls) == 0]
 
-                # Count detections (person class = 1, ball class = 0 in trained model)
-                boxes = results[0].boxes
-                person_detections = [box for box in boxes if int(box.cls) == 1]
-
-                # Ball detection with size filtering (trained model uses class 0)
+                # Use TRAINED model for ball detection (trained class 0 = Ball)
+                trained_results = trained_model(frame, verbose=False, conf=0.15)
+                trained_boxes = trained_results[0].boxes
                 ball_detections = []
-                for box in boxes:
+                for box in trained_boxes:
                     if int(box.cls) == 0:  # Ball class in trained model
-                        # Filter by box size (volleyball should be 10-200 pixels)
                         x1, y1, x2, y2 = box.xyxy[0]
                         box_width = x2 - x1
                         box_height = y2 - y1
-                        if 10 < box_width < 300 and 10 < box_height < 300:
+                        if 5 < box_width < 300 and 5 < box_height < 300:
                             ball_detections.append(box)
 
                 detections_in_frame = len(person_detections)
@@ -108,24 +110,30 @@ def detect_in_video(gcs_uri: str) -> dict:
                     "objects": []
                 }
 
-                for box in boxes:
+                # Add person detections
+                for box in person_detections:
                     x1, y1, x2, y2 = box.xyxy[0]
                     conf = float(box.conf[0])
-                    cls_id = int(box.cls[0])
-
-                    # Map class IDs: 0=ball, 1=person/player in trained model
-                    label = "ball" if cls_id == 0 else "player" if cls_id == 1 else "unknown"
-
                     frame_obj["objects"].append({
-                        "label": label,
+                        "label": "player",
+                        "confidence": conf,
+                        "bbox": [float(x1), float(y1), float(x2), float(y2)]
+                    })
+
+                # Add ball detections
+                for box in ball_detections:
+                    x1, y1, x2, y2 = box.xyxy[0]
+                    conf = float(box.conf[0])
+                    frame_obj["objects"].append({
+                        "label": "ball",
                         "confidence": conf,
                         "bbox": [float(x1), float(y1), float(x2), float(y2)]
                     })
 
                 frames_detections.append(frame_obj)
 
-                # Draw boxes on frame
-                annotated_frame = results[0].plot()
+                # Draw boxes on frame using pretrained model's annotations
+                annotated_frame = pretrained_results[0].plot()
                 out.write(annotated_frame)
                 processed_frames += 1
             else:
