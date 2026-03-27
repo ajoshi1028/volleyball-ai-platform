@@ -172,10 +172,21 @@ export default function Home() {
     openReview(film, localUrl)
   }
 
-  function handleNewUploadFile(file) {
-    // Go to upload screen but pre-load the file
+  async function handleNewUploadFile(file) {
+    // Upload to GCS first
     const localUrl = URL.createObjectURL(file)
-    handleUploadComplete({ gcs_uri: '', filename: file.name }, localUrl)
+    const form = new FormData()
+    form.append('file', file)
+
+    try {
+      const res = await fetch(`${API_BASE}/upload-video`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error('Upload failed')
+      const result = await res.json()
+      handleUploadComplete(result, localUrl)
+    } catch (err) {
+      console.error('Upload error:', err)
+      alert('Failed to upload video. Please try again.')
+    }
   }
 
   function handleSeek(time) {
