@@ -1,211 +1,307 @@
-import cv2
-import numpy as np
-from collections import defaultdict
+"""
+Play recognition logic for volleyball AI platform.
 
-class PlayRecognizer:
-    """Recognize volleyball plays based on player positions and movements"""
+Takes YOLO detection output (bounding boxes per frame) and classifies
+what type of volleyball play is occurring.
 
-    def __init__(self, frame_height, frame_width):
-        self.frame_height = frame_height
-        self.frame_width = frame_width
+Detection schema (agreed with Yoshi):
+{
+  "video_id": str,
+  "gcs_uri": str,
+  "fps": float,
+  "frame_count": int,
+  "detections": [
+    {
+      "frame": int,
+      "timestamp_sec": float,
+      "objects": [
+        {
+          "label": "player" | "ball",
+          "confidence": float,        # 0.0 - 1.0
+          "bbox": [x1, y1, x2, y2],  # pixel coords, top-left to bottom-right
+          "track_id": int | None      # optional tracking ID across frames
+        }
+      ]
+    }
+  ]
+}
+"""
 
-        # Court zones (rough estimates for typical volleyball court)
-        self.baseline_zone = frame_height * 0.85  # Bottom 15% is baseline
-        self.net_zone_start = frame_height * 0.35
-        self.net_zone_end = frame_height * 0.65
-        self.net_x = frame_width / 2
-        self.net_tolerance = frame_width * 0.15
-
-    def get_play_type(self, detections, prev_detections=None):
-        """
-        Classify play type based on player detections
-
-        Args:
-            detections: List of bounding boxes [x1, y1, x2, y2, conf, cls]
-            prev_detections: Previous frame detections for motion analysis
-
-        Returns:
-            play_type: str (serve, block, spike, dig, set, receive, or None)
-            confidence: float (0-1)
-        """
-        if not detections or len(detections) == 0:
-            return None, 0.0
-
-        # Extract player positions (center of bboxes)
-        players = self._extract_player_positions(detections)
-
-        if not players:
-            return None, 0.0
-
-        # Analyze player positions and postures
-        baseline_players = [p for p in players if p['y'] > self.baseline_zone]
-        net_players = [p for p in players if self.net_zone_start < p['y'] < self.net_zone_end]
-        mid_court_players = [p for p in players if p['y'] <= self.net_zone_start]
-
-        # Check for different plays
-        if len(baseline_players) >= 1 and len(players) < 6:
-            return "serve", 0.7
-
-        if len(net_players) >= 2:
-            # Multiple players at net
-            if self._players_clustered(net_players):
-                return "block", 0.75
-            else:
-                return "set", 0.6
-
-        if len(mid_court_players) >= 1:
-            return "attack", 0.65
-
-        if len(baseline_players) >= 2:
-            return "dig", 0.6
-
-        return None, 0.0
-
-    def _extract_player_positions(self, detections):
-        """Extract center positions of detected players"""
-        players = []
-        for det in detections:
-            if len(det) >= 6:
-                x1, y1, x2, y2, conf, cls_id = det[0], det[1], det[2], det[3], det[4], det[5]
-
-                # Filter low confidence detections
-                if conf < 0.5:
-                    continue
-
-                # Only people (class 0)
-                if int(cls_id) != 0:
-                    continue
-
-                center_x = (x1 + x2) / 2
-                center_y = (y1 + y2) / 2
-                height = y2 - y1
-                width = x2 - x1
-
-                players.append({
-                    'x': center_x,
-                    'y': center_y,
-                    'height': height,
-                    'width': width,
-                    'bbox': (x1, y1, x2, y2)
-                })
-
-        return players
-
-    def _players_clustered(self, players, distance_threshold=150):
-        """Check if players are clustered together (close to each other)"""
-        if len(players) < 2:
-            return False
-
-        # Calculate average distance between players
-        distances = []
-        for i in range(len(players)):
-            for j in range(i + 1, len(players)):
-                dist = np.sqrt((players[i]['x'] - players[j]['x'])**2 +
-                               (players[i]['y'] - players[j]['y'])**2)
-                distances.append(dist)
-
-        if not distances:
-            return False
-
-        avg_distance = np.mean(distances)
-        return avg_distance < distance_threshold
-
-    def _is_jumping(self, current_players, prev_players):
-        """Detect if players are jumping based on position change"""
-        if not prev_players or not current_players:
-            return False
-
-        # Match players between frames and check height changes
-        for curr in current_players:
-            # Find closest player in previous frame
-            if prev_players:
-                closest_prev = min(prev_players,
-                                 key=lambda p: abs(p['x'] - curr['x']) + abs(p['y'] - curr['y']))
-
-                # If player moved up significantly, they're jumping
-                if closest_prev['y'] - curr['y'] > 50:  # Moved up 50+ pixels
-                    return True
-
-        return False
+from typing import Optional
 
 
-def analyze_plays(video_path, detections_by_frame, model):
+# ---------------------------------------------------------------------------
+# Types (plain dicts — no extra dependencies needed)
+# ---------------------------------------------------------------------------
+
+BBox = list[float]  # [x1, y1, x2, y2]
+
+
+def _center(bbox: BBox) -> tuple[float, float]:
+    """Return (cx, cy) center of a bounding box."""
+    x1, y1, x2, y2 = bbox
+    return ((x1 + x2) / 2, (y1 + y2) / 2)
+
+
+def _height(bbox: BBox) -> float:
+    return abs(bbox[3] - bbox[1])
+
+
+def _width(bbox: BBox) -> float:
+    return abs(bbox[2] - bbox[0])
+
+
+def _area(bbox: BBox) -> float:
+    return _width(bbox) * _height(bbox)
+
+
+# ---------------------------------------------------------------------------
+# Play classification helpers
+# ---------------------------------------------------------------------------
+
+def _get_ball_positions(detections: list[dict]) -> list[Optional[tuple[float, float]]]:
     """
-    Analyze video and extract play-by-play information
+    Return a list of (cx, cy) ball positions per frame, or None if no ball found.
+    """
+    positions = []
+    for frame_data in detections:
+        ball = next(
+            (obj for obj in frame_data.get("objects", []) if obj["label"] == "ball"),
+            None,
+        )
+        if ball:
+            positions.append(_center(ball["bbox"]))
+        else:
+            positions.append(None)
+    return positions
+
+
+def _ball_vertical_velocity(positions: list[Optional[tuple[float, float]]], window: int = 5) -> list[Optional[float]]:
+    """
+    Estimate vertical velocity of the ball at each frame (pixels/frame).
+    Positive = moving down (y increases downward in image coords).
+    Returns None where ball isn't detected.
+    """
+    velocities: list[Optional[float]] = [None] * len(positions)
+    for i in range(window, len(positions) - window):
+        before = positions[i - window]
+        after = positions[i + window]
+        if before is not None and after is not None:
+            dy = after[1] - before[1]
+            velocities[i] = dy / (2 * window)
+    return velocities
+
+
+def _find_players(frame_data: dict) -> list[dict]:
+    return [obj for obj in frame_data.get("objects", []) if obj["label"] == "player"]
+
+
+# ---------------------------------------------------------------------------
+# Play segment detection
+# ---------------------------------------------------------------------------
+
+def _classify_play_at_frame(
+    frame_idx: int,
+    detections: list[dict],
+    ball_positions: list[Optional[tuple[float, float]]],
+    ball_velocities: list[Optional[float]],
+    frame_height: int = 720,
+) -> Optional[str]:
+    """
+    Heuristic classification of a single frame's play type.
+
+    Rules (tunable):
+      - SERVE:   Ball detected high in frame (top 30%), no nearby players underneath it
+      - SET:     Ball detected mid-frame (30–60% height), player hands near ball (small bbox above waist)
+      - DIG:     Ball detected low in frame (bottom 40%), player(s) crouched (tall/wide aspect ratio)
+      - SPIKE:   Ball moving sharply downward (high positive velocity) AND a player is elevated
+                 (player bbox center in upper 50% of frame)
+    """
+    if frame_idx >= len(detections):
+        return None
+
+    ball_pos = ball_positions[frame_idx]
+    if ball_pos is None:
+        return None  # Can't classify without ball
+
+    ball_cx, ball_cy = ball_pos
+    ball_y_norm = ball_cy / frame_height  # 0 = top, 1 = bottom
+
+    players = _find_players(detections[frame_idx])
+    velocity = ball_velocities[frame_idx]
+
+    # --- SPIKE: ball moving fast downward + a player is elevated ---
+    if velocity is not None and velocity > 8:
+        elevated_players = [
+            p for p in players
+            if _center(p["bbox"])[1] / frame_height < 0.5
+        ]
+        if elevated_players:
+            return "spike"
+
+    # --- SERVE: ball very high up, moving upward or slow ---
+    if ball_y_norm < 0.30:
+        if velocity is None or abs(velocity) < 4:
+            return "serve"
+
+    # --- DIG: ball low, at least one player in wide/low stance ---
+    if ball_y_norm > 0.60:
+        crouched = [
+            p for p in players
+            if _width(p["bbox"]) > _height(p["bbox"]) * 0.6  # wide stance
+        ]
+        if crouched:
+            return "dig"
+
+    # --- SET: ball mid-height, player close to ball ---
+    if 0.30 <= ball_y_norm <= 0.60:
+        nearby = [
+            p for p in players
+            if abs(_center(p["bbox"])[0] - ball_cx) < 80
+            and abs(_center(p["bbox"])[1] - ball_cy) < 100
+        ]
+        if nearby:
+            return "set"
+
+    return None
+
+
+def _merge_consecutive(play_frames: list[tuple[int, str]], min_run: int = 3) -> list[dict]:
+    """
+    Convert per-frame labels into play segments, filtering out noise (runs < min_run frames).
+    Returns list of {play, start_frame, end_frame}.
+    """
+    if not play_frames:
+        return []
+
+    segments = []
+    run_start_frame, run_label = play_frames[0]
+    run_count = 1
+
+    for i in range(1, len(play_frames)):
+        frame, label = play_frames[i]
+        if label == run_label:
+            run_count += 1
+        else:
+            if run_count >= min_run:
+                segments.append({
+                    "play": run_label,
+                    "start_frame": run_start_frame,
+                    "end_frame": play_frames[i - 1][0],
+                })
+            run_start_frame, run_label = frame, label
+            run_count = 1
+
+    if run_count >= min_run:
+        segments.append({
+            "play": run_label,
+            "start_frame": run_start_frame,
+            "end_frame": play_frames[-1][0],
+        })
+
+    return segments
+
+
+# ---------------------------------------------------------------------------
+# Second pass corrections
+# ---------------------------------------------------------------------------
+
+def _fix_spike_dig_confusion(segments: list[dict], min_gap_frames: int = 15) -> list[dict]:
+    """
+    Remove a 'dig' segment that appears too soon after a 'spike'.
+
+    When a spike lands, the ball bounces low in the frame and can get
+    misclassified as a dig. If the gap between the spike's end frame and
+    the next dig's start frame is less than min_gap_frames, discard the dig.
+    """
+    cleaned = []
+    for i, seg in enumerate(segments):
+        if seg["play"] == "dig" and i > 0:
+            prev = segments[i - 1]
+            if prev["play"] == "spike":
+                gap = seg["start_frame"] - prev["end_frame"]
+                if gap < min_gap_frames:
+                    continue  # discard this dig
+        cleaned.append(seg)
+    return cleaned
+
+
+def _apply_rally_sequencing(segments: list[dict]) -> list[dict]:
+    """
+    Use rally context to fix misclassified sets.
+
+    A 'serve' that follows a 'dig' or another 'serve' is almost certainly
+    a high set that got misclassified due to the ball being high in the frame.
+    Relabel it as a 'set'.
+    """
+    for i, seg in enumerate(segments):
+        if seg["play"] == "serve" and i > 0:
+            prev = segments[i - 1]
+            if prev["play"] in ("dig", "serve"):
+                seg["play"] = "set"
+    return segments
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def recognize_plays(detection_result: dict) -> dict:
+    """
+    Run play recognition on a detection result.
 
     Args:
-        video_path: Path to video file
-        detections_by_frame: Dict of frame_num -> detections
-        model: YOLO model for detection
+        detection_result: Dict matching the detection schema above.
 
     Returns:
-        plays: List of detected plays with timestamps
+        {
+          "video_id": str,
+          "fps": float,
+          "plays": [
+            {
+              "play": "serve" | "dig" | "set" | "spike",
+              "start_frame": int,
+              "end_frame": int,
+              "start_time_sec": float,
+              "end_time_sec": float
+            }
+          ],
+          "summary": {"serve": int, "dig": int, "set": int, "spike": int}
+        }
     """
-    cap = cv2.VideoCapture(video_path)
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    detections = detection_result.get("detections", [])
+    fps = detection_result.get("fps", 30.0)
+    video_id = detection_result.get("video_id", "unknown")
 
-    recognizer = PlayRecognizer(frame_height, frame_width)
-    plays = []
-    current_play = None
-    play_start_frame = 0
-    prev_detections = None
-    frame_num = 0
+    ball_positions = _get_ball_positions(detections)
+    ball_velocities = _ball_vertical_velocity(ball_positions)
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+    # Classify each frame
+    play_frames: list[tuple[int, str]] = []
+    for i, frame_data in enumerate(detections):
+        label = _classify_play_at_frame(i, detections, ball_positions, ball_velocities)
+        if label:
+            play_frames.append((frame_data.get("frame", i), label))
 
-        # Run detection every 5th frame
-        if frame_num % 5 == 0:
-            results = model(frame, verbose=False, conf=0.3)
-            boxes = results[0].boxes
+    segments = _merge_consecutive(play_frames)
+    segments = _fix_spike_dig_confusion(segments)
+    segments = _apply_rally_sequencing(segments)
 
-            # Convert to simple format
-            detections = []
-            for box in boxes:
-                x1, y1, x2, y2 = box.xyxy[0]
-                conf = box.conf[0]
-                cls_id = box.cls[0]
-                detections.append([x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_id.item()])
+    # Attach timestamps
+    for seg in segments:
+        seg["start_time_sec"] = round(seg["start_frame"] / fps, 2)
+        seg["end_time_sec"] = round(seg["end_frame"] / fps, 2)
 
-            # Recognize play
-            play_type, confidence = recognizer.get_play_type(detections, prev_detections)
+    # Summary counts
+    summary = {"serve": 0, "dig": 0, "set": 0, "spike": 0}
+    for seg in segments:
+        play = seg["play"]
+        if play in summary:
+            summary[play] += 1
 
-            # Track play sequences
-            if play_type and confidence > 0.5:
-                if current_play is None or current_play['type'] != play_type:
-                    # New play detected
-                    if current_play:
-                        current_play['end_frame'] = frame_num - 5
-                        current_play['duration_sec'] = (current_play['end_frame'] - current_play['start_frame']) / fps
-                        plays.append(current_play)
-
-                    current_play = {
-                        'type': play_type,
-                        'start_frame': frame_num,
-                        'confidence': confidence,
-                        'timestamp_sec': frame_num / fps
-                    }
-            else:
-                if current_play:
-                    current_play['end_frame'] = frame_num - 5
-                    current_play['duration_sec'] = (current_play['end_frame'] - current_play['start_frame']) / fps
-                    plays.append(current_play)
-                    current_play = None
-
-            prev_detections = detections
-
-        frame_num += 1
-
-    cap.release()
-
-    # Add final play if exists
-    if current_play:
-        current_play['end_frame'] = frame_num
-        current_play['duration_sec'] = (frame_num - current_play['start_frame']) / fps
-        plays.append(current_play)
-
-    return plays
+    return {
+        "video_id": video_id,
+        "fps": fps,
+        "plays": segments,
+        "summary": summary,
+    }

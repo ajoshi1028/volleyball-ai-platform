@@ -1,0 +1,8 @@
+path: /Users/abhinavjoshi/volleyball-ai-platform/backend
+train: train
+val: valid
+test: test
+nc: 2
+names:
+  0: Ball
+  1: Person

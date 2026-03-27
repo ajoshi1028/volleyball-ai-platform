@@ -79,10 +79,10 @@ def detect_in_video(gcs_uri: str) -> dict:
                 boxes = results[0].boxes
                 person_detections = [box for box in boxes if int(box.cls) == 0]
 
-                # Ball detection with size filtering (class 0 in trained model)
+                # Ball detection with size filtering
                 ball_detections = []
                 for box in boxes:
-                    if int(box.cls) == 0:  # Ball class in trained model
+                    if int(box.cls) == 32:  # Sports ball class
                         # Filter by box size (volleyball should be 10-200 pixels)
                         x1, y1, x2, y2 = box.xyxy[0]
                         box_width = x2 - x1
