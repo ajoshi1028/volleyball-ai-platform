@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------
-// Update these types when Yoshi and Josh finalize their data schemas
+// Volleyball AI Platform — Type Definitions
 // -----------------------------------------------------------------
 
 export interface UploadResponse {
@@ -7,16 +7,33 @@ export interface UploadResponse {
   filename: string;
 }
 
-// Yoshi — update when /detect response shape is finalized
-export interface DetectionFrame {
-  frame: number;
-  timestamp: number;
-  players: TrackedPlayer[];
+export interface BBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 }
 
-// Yoshi — update fields when detection schema is finalized
+export interface DetectedObject {
+  label: "player" | "ball";
+  confidence: number;
+  bbox: [number, number, number, number]; // [x1, y1, x2, y2]
+}
+
+export interface DetectionFrame {
+  frame: number;
+  timestamp: number;       // seconds
+  objects: DetectedObject[];
+  play?: string;           // play type active at this frame (serve, spike, etc.)
+  playConfidence?: number; // how confident the classification is
+}
+
 export interface TrackedPlayer {
   id: string;
+  jersey?: number;
+  position?: string;
+  x?: number;
+  y?: number;
   [key: string]: unknown;
 }
 
@@ -24,23 +41,44 @@ export interface FilmRecord {
   id: string;
   filename: string;
   gcs_uri: string;
-  uploadedAt: string; // ISO string
-  duration?: number;  // seconds, saved after first playback
-  thumbnail?: string; // base64 data URL, captured from first frame
+  uploadedAt: string;
+  duration?: number;
+  thumbnail?: string;
 }
 
-// Josh — matches /results/{video_id} response shape
 export interface Play {
   id: string;
-  label: string;                    // mapped from "play" field
-  timestamp: number;                // mapped from start_time_sec for seeking
+  label: string;
+  timestamp: number;
   start_time_sec?: number;
   end_time_sec?: number;
 }
 
-// Detection and Play Recognition result types
+export interface BallPosition {
+  frame: number;
+  timestamp: number;
+  x: number;
+  y: number;
+  speed_px_per_sec?: number;
+}
+
 export interface DetectionResult {
-  [key: string]: unknown;
+  totalFrames: number;
+  fps: number;
+  resolution: string;
+  framesWithDetections: number;
+  maxPeopleInFrame: number;
+  avgPeoplePerFrame: number;
+  totalDetections: number;
+  framesWithBall: number;
+  ballDetectionRate: number;
+  processedFrames: number;
+  annotatedVideoUri?: string;
+  playSummary: Record<string, number>;
+  ballSpeed?: {
+    avg_px_per_sec: number;
+    max_px_per_sec: number;
+  };
 }
 
 export interface PlayResult {

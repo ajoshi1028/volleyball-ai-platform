@@ -1,13 +1,7 @@
 "use client";
 
-// -----------------------------------------------------------------
-// Yoshi: when /detect returns bounding boxes, pass them in via the
-// `detections` prop (update the DetectionFrame type in ../types.ts)
-// and draw them on the <canvas> overlay synced to currentTime.
-// -----------------------------------------------------------------
-
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { DetectionFrame } from "../types";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { DetectionFrame, Play } from "../types";
 
 export interface VideoPlayerHandle {
   seek: (time: number) => void;
@@ -16,6 +10,7 @@ export interface VideoPlayerHandle {
 interface Props {
   src: string;
   detections: DetectionFrame[];
+  plays: Play[];
   analyzing: boolean;
   onTimeUpdate?: (currentTime: number) => void;
   onDurationChange?: (duration: number) => void;
@@ -28,13 +23,23 @@ function formatTime(seconds: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+const PLAY_COLORS: Record<string, string> = {
+  serve: "#ff6300",
+  spike: "#ef4444",
+  block: "#3b82f6",
+  set: "#22c55e",
+  dig: "#a855f7",
+};
+
 const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
-  { src, detections, analyzing, onTimeUpdate, onDurationChange, onThumbnail },
+  { src, detections, plays, analyzing, onTimeUpdate, onDurationChange, onThumbnail },
   ref
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrubberRef = useRef<HTMLDivElement>(null);
+  const animFrameRef = useRef<number>(0);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -46,6 +51,149 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
     },
   }));
 
+  // ─── Canvas overlay drawing ───────────────────────────────────
+  const drawOverlay = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Match canvas size to video display size
+    const rect = video.getBoundingClientRect();
+    if (canvas.width !== rect.width || canvas.height !== rect.height) {
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const t = video.currentTime;
+
+    // Find current play
+    const activePlay = plays.find(
+      (p) => t >= (p.start_time_sec ?? p.timestamp) && t <= (p.end_time_sec ?? p.timestamp + 2)
+    );
+
+    // Find closest detection frame
+    const frame = detections.reduce<DetectionFrame | null>((best, f) => {
+      if (!best) return f;
+      return Math.abs(f.timestamp - t) < Math.abs(best.timestamp - t) ? f : best;
+    }, null);
+
+    const isFrameClose = frame && Math.abs(frame.timestamp - t) < 0.5;
+
+    if (isFrameClose && frame) {
+      // Compute scale: detection coords are in original video resolution
+      // We need to map them to the canvas display size
+      const videoW = video.videoWidth || 1920;
+      const videoH = video.videoHeight || 1080;
+
+      // Account for object-contain: video is centered with letterboxing
+      const displayAspect = rect.width / rect.height;
+      const videoAspect = videoW / videoH;
+
+      let scaleX: number, scaleY: number, offsetX: number, offsetY: number;
+      if (displayAspect > videoAspect) {
+        // Letterboxed on sides
+        const renderH = rect.height;
+        const renderW = renderH * videoAspect;
+        scaleX = renderW / videoW;
+        scaleY = renderH / videoH;
+        offsetX = (rect.width - renderW) / 2;
+        offsetY = 0;
+      } else {
+        // Letterboxed on top/bottom
+        const renderW = rect.width;
+        const renderH = renderW / videoAspect;
+        scaleX = renderW / videoW;
+        scaleY = renderH / videoH;
+        offsetX = 0;
+        offsetY = (rect.height - renderH) / 2;
+      }
+
+      // Draw player bounding boxes
+      for (const obj of frame.objects) {
+        const [x1, y1, x2, y2] = obj.bbox;
+        const dx = x1 * scaleX + offsetX;
+        const dy = y1 * scaleY + offsetY;
+        const dw = (x2 - x1) * scaleX;
+        const dh = (y2 - y1) * scaleY;
+
+        if (obj.label === "player") {
+          const color = activePlay ? (PLAY_COLORS[activePlay.label.toLowerCase()] || "#ff6300") : "#ff6300";
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(dx, dy, dw, dh);
+
+          // Confidence label
+          const conf = Math.round(obj.confidence * 100);
+          ctx.font = "bold 11px sans-serif";
+          const labelText = activePlay
+            ? `${activePlay.label} ${conf}%`
+            : `Player ${conf}%`;
+          const textW = ctx.measureText(labelText).width;
+
+          ctx.fillStyle = color;
+          ctx.fillRect(dx, dy - 18, textW + 8, 18);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(labelText, dx + 4, dy - 5);
+        } else if (obj.label === "ball") {
+          // Ball: bright circle
+          const cx = (x1 + x2) / 2 * scaleX + offsetX;
+          const cy = (y1 + y2) / 2 * scaleY + offsetY;
+          const r = Math.max(dw, dh) / 2 + 4;
+
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.strokeStyle = "#fbbf24";
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          ctx.font = "bold 12px sans-serif";
+          ctx.fillStyle = "#fbbf24";
+          ctx.fillText(`Ball ${Math.round(obj.confidence * 100)}%`, cx + r + 4, cy + 4);
+        }
+      }
+    }
+
+    // Draw active play banner at top
+    if (activePlay) {
+      const color = PLAY_COLORS[activePlay.label.toLowerCase()] || "#ff6300";
+
+      ctx.fillStyle = color + "cc";
+      const bannerW = 200;
+      const bannerH = 36;
+      const bannerX = (canvas.width - bannerW) / 2;
+      const bannerY = 16;
+
+      // Rounded rect
+      ctx.beginPath();
+      ctx.roundRect(bannerX, bannerY, bannerW, bannerH, 8);
+      ctx.fill();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 16px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(activePlay.label.toUpperCase(), canvas.width / 2, bannerY + 24);
+      ctx.textAlign = "start";
+    }
+
+    animFrameRef.current = requestAnimationFrame(drawOverlay);
+  }, [detections, plays]);
+
+  // Start/stop the overlay draw loop
+  useEffect(() => {
+    if (detections.length > 0 || plays.length > 0) {
+      animFrameRef.current = requestAnimationFrame(drawOverlay);
+    }
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
+  }, [detections, plays, drawOverlay]);
+
+  // ─── Keyboard shortcuts ───────────────────────────────────────
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -92,7 +240,6 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
     onDurationChange?.(video.duration);
 
     if (!onThumbnail) return;
-    // Seek to 10% into the video (or 1s, whichever is smaller) to grab a representative frame
     const seekTo = Math.min(1, video.duration * 0.1);
     video.currentTime = seekTo;
     video.addEventListener("seeked", function capture() {
@@ -114,7 +261,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
   }
 
   const progressPct = duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
-  const hasDetections = detections.length > 0;
+  const hasOverlay = detections.length > 0 || plays.length > 0;
 
   return (
     <div ref={containerRef} className="relative flex flex-col h-full bg-black">
@@ -129,12 +276,14 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
         onClick={togglePlay}
       />
 
-      {/* Canvas overlay — Yoshi draws bounding boxes here */}
-      {hasDetections && (
-        <canvas className="absolute inset-0 w-full h-full pointer-events-none" />
-      )}
+      {/* Canvas overlay for bounding boxes + play labels */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full pointer-events-none"
+        style={{ display: hasOverlay ? "block" : "none" }}
+      />
 
-      {/* Bottom control bar — overlaid on video */}
+      {/* Bottom control bar */}
       <div
         className="absolute bottom-0 left-0 right-0 flex flex-col gap-2 px-4 pt-6 pb-3"
         style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)" }}
@@ -146,14 +295,11 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
           onMouseMove={(e) => e.buttons === 1 && scrubTo(e)}
           className="relative flex items-center h-5 cursor-pointer group"
         >
-          {/* Visible track */}
           <div className="absolute inset-x-0 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.25)" }} />
-          {/* Progress */}
           <div
             className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded-full pointer-events-none"
             style={{ width: `${progressPct}%`, background: "#ff6300" }}
           />
-          {/* Thumb */}
           <div
             className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
             style={{ left: `${progressPct}%`, background: "#ff6300", boxShadow: "0 0 4px rgba(255,99,0,0.8)" }}
@@ -162,7 +308,6 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
 
         {/* Controls row */}
         <div className="flex items-center gap-3">
-          {/* Play/pause */}
           <button onClick={togglePlay} className="text-white hover:text-orange-400 transition-colors">
             {playing ? (
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -175,27 +320,24 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
             )}
           </button>
 
-          {/* Time */}
           <span className="text-xs tabular-nums text-white/70">
             {formatTime(currentTime)}{duration > 0 ? ` / ${formatTime(duration)}` : ""}
           </span>
 
           <div className="flex-1" />
 
-          {/* Analyzing badge */}
           {analyzing && (
             <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(255,99,0,0.2)", color: "#ff6300" }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#ff6300" }} />
               Analyzing...
             </span>
           )}
-          {hasDetections && !analyzing && (
+          {hasOverlay && !analyzing && (
             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(255,99,0,0.2)", color: "#ff6300" }}>
               AI Tracking
             </span>
           )}
 
-          {/* Fullscreen */}
           <button onClick={toggleFullscreen} className="text-white/60 hover:text-white transition-colors">
             {isFullscreen ? (
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

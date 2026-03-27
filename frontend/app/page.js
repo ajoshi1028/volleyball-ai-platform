@@ -174,7 +174,17 @@ export default function Home() {
         processedFrames: data.processed_frames,
         annotatedVideoUri: data.annotated_video_uri,
         playSummary: data.play_summary || {},
+        ballSpeed: data.ball_speed || null,
       })
+
+      // Load detection frames for video overlay (bounding boxes)
+      const frames = (data.detection_frames || []).map((f) => ({
+        frame: f.frame,
+        timestamp: f.timestamp,
+        objects: f.objects || [],
+        play: f.play || null,
+      }))
+      setDetectionFrames(frames)
 
       // Extract plays with timestamps from play_recognition
       const playRecognition = data.play_recognition || {}
@@ -275,6 +285,7 @@ export default function Home() {
               ref={playerRef}
               src={localVideoUrl}
               detections={detectionFrames}
+              plays={plays}
               analyzing={analyzing}
               onTimeUpdate={setCurrentTime}
               onDurationChange={setVideoDuration}
@@ -303,6 +314,12 @@ export default function Home() {
                 <StatItem label="Ball Detection" value={`${detectionStats.ballDetectionRate}%`} />
                 <StatItem label="Frames Analyzed" value={detectionStats.processedFrames} />
                 <StatItem label="Resolution" value={detectionStats.resolution} />
+                {detectionStats.ballSpeed && (
+                  <>
+                    <StatItem label="Ball Avg Speed" value={`${detectionStats.ballSpeed.avg_px_per_sec} px/s`} highlight />
+                    <StatItem label="Ball Max Speed" value={`${detectionStats.ballSpeed.max_px_per_sec} px/s`} highlight />
+                  </>
+                )}
                 {Object.entries(detectionStats.playSummary || {}).map(([play, count]) => (
                   <StatItem
                     key={play}
