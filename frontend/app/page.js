@@ -99,8 +99,6 @@ export default function Home() {
     setAnalyzing(true)
     setScreen('review')
 
-    // TODO (Yoshi): replace with real /detect call
-    // TODO (Josh): replace with real /results call
     setTimeout(() => setAnalyzing(false), 3000)
   }
 

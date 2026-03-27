@@ -26,3 +26,14 @@ volleyball-backend-key.json
 
 # -------- VSCode --------
 .vscode/
+
+# -------- Logs --------
+*.log
+frontend/*.log
+backend/*.log
+
+# -------- IDE --------
+.idea/
+*.swp
+*.swo
+*~
