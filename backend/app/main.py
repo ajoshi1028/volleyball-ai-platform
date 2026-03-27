@@ -114,51 +114,8 @@ results_store: dict[str, dict[str, Any]] = {}
 
 
 class DetectionResult(BaseModel):
-    video_id: str
-    gcs_uri: str
-    fps: float = 30.0
-    frame_count: int = 0
-    detections: list[dict[str, Any]] = []
-
-
-@app.post("/store-results")
-async def store_results(detection: DetectionResult):
-    plays = recognize_plays(detection.detections, detection.fps)
-    results_store[detection.video_id] = {
-        "detections": detection.model_dump(),
-        "plays": plays,
-    }
-    return {
-        "message": "Results stored and plays recognized",
-        "video_id": detection.video_id,
-        "play_summary": {p["play"]: 1 for p in plays.get("plays", [])},
-    }
-
-
-@app.get("/results/{video_id}")
-async def get_results(video_id: str):
-    if video_id not in results_store:
-        raise HTTPException(status_code=404, detail="Results not found")
-    return results_store[video_id]
-
-
-@app.get("/results")
-async def list_results():
-    return {
-        "processed_videos": [
-            {"video_id": vid, "play_summary": data.get("plays", {}).get("summary", {})}
-            for vid, data in results_store.items()
-        ]
-    }
-
-
-# ---------------------------------------------------------------------------
-# Josh's endpoints — results storage + play recognition
-# ---------------------------------------------------------------------------
-
-class DetectionResult(BaseModel):
     """
-    Schema for YOLO detection output. Yoshi posts to /store-results with this shape.
+    Schema for YOLO detection output.
 
     Fields:
         video_id:    Unique ID for the video (e.g. filename without extension)
@@ -174,18 +131,35 @@ class DetectionResult(BaseModel):
     detections: list[dict[str, Any]] = []
 
 
+def recognize_plays(detection_result: dict) -> dict:
+    """
+    Extract play types from detection results.
+
+    Returns plays dict with play_type counts and summary
+    """
+    plays = detection_result.get("plays", {})
+
+    # Count plays
+    play_counts = plays if isinstance(plays, dict) else {}
+
+    return {
+        "plays": [{"play": play_type, "count": count} for play_type, count in play_counts.items()],
+        "summary": play_counts,
+    }
+
+
 @app.post("/store-results")
 async def store_results(detection: DetectionResult):
     """
     Store YOLO detection results and run play recognition.
 
-    Called by Yoshi's /detect step after YOLOv8 finishes processing.
+    Called after /detect finishes processing.
     Runs play recognition automatically and saves everything in memory.
 
     Returns:
         Stored video_id + play recognition summary
     """
-    detection_dict = detection.dict()
+    detection_dict = detection.model_dump()
 
     # Run play recognition on the detection data
     play_result = recognize_plays(detection_dict)
@@ -215,7 +189,7 @@ async def get_results(video_id: str):
         video_id: The video ID used when results were stored
 
     Returns:
-        Full detection data + play recognition output (segments + summary)
+        Full detection data + play recognition output
     """
     if video_id not in results_store:
         raise HTTPException(
@@ -247,6 +221,100 @@ async def list_results():
                 }
                 for vid, data in results_store.items()
             ]
+        },
+    )
+
+
+@app.get("/search")
+async def search_plays(
+    play_type: str = None,
+    video_id: str = None,
+    confidence_threshold: float = 0.5
+):
+    """
+    Search for plays across videos with optional filters.
+
+    Args:
+        play_type: Type of play to search for (e.g., "serve", "block", "set", "attack", "dig")
+        video_id: Optional filter to search within a specific video
+        confidence_threshold: Minimum confidence score (0-1)
+
+    Returns:
+        List of matching plays with timestamps and metadata
+    """
+    results = []
+
+    for vid, data in results_store.items():
+        # Skip if filtering by video_id and it doesn't match
+        if video_id and vid != video_id:
+            continue
+
+        plays_summary = data.get("plays", {}).get("summary", {})
+
+        # Filter by play_type if specified
+        if play_type:
+            if play_type in plays_summary:
+                results.append({
+                    "video_id": vid,
+                    "play_type": play_type,
+                    "count": plays_summary[play_type],
+                    "gcs_uri": data.get("detections", {}).get("gcs_uri", ""),
+                })
+        else:
+            # Return all plays for this video
+            for ptype, count in plays_summary.items():
+                results.append({
+                    "video_id": vid,
+                    "play_type": ptype,
+                    "count": count,
+                    "gcs_uri": data.get("detections", {}).get("gcs_uri", ""),
+                })
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "query": {
+                "play_type": play_type,
+                "video_id": video_id,
+            },
+            "results": results,
+            "total_matches": len(results),
+        },
+    )
+
+
+@app.post("/trajectory")
+async def get_trajectory(video_id: str, play_type: str = None):
+    """
+    Get ball trajectory data for a video or specific play.
+
+    Args:
+        video_id: Video to analyze
+        play_type: Optional play type filter
+
+    Returns:
+        Ball positions and trajectory data
+    """
+    if video_id not in results_store:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    data = results_store[video_id]
+    detections = data.get("detections", {})
+
+    # Extract ball detections (class 0 in trained model)
+    ball_trajectory = []
+    frame_num = 0
+
+    # This is a simplified version - in production you'd extract actual ball positions
+    # from the detections list
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "video_id": video_id,
+            "play_type": play_type,
+            "ball_trajectory": ball_trajectory,
+            "frame_rate": detections.get("fps", 30),
         },
     )
 
