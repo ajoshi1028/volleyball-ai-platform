@@ -25,12 +25,11 @@ Volleyball AI Platform
 │   ├── /search          → Search for plays by type
 │   └── /trajectory      → Get ball trajectory data
 │
-└── Frontend (Next.js 14 + React)
-    ├── Film Library     → Browse uploaded videos
-    ├── Video Uploader   → Drag-and-drop upload
-    ├── Video Player     → Watch with detection overlay
-    ├── Play Timeline    → Visualize detected plays
-    └── Player Panel     → Track individual players
+└── Frontend (Next.js 16.2.1 + React 19.2.4)
+    ├── Film Library     → Browse uploaded videos with drag-and-drop
+    ├── Detection View   → YOLO detection results with statistics
+    ├── Play Recognition → Automatic play type detection
+    └── Results Display  → Search and filter plays across videos
 ```
 
 ## 🛠️ Tech Stack
