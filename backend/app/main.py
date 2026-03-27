@@ -12,8 +12,17 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.gcs import upload_to_gcs
+from utils.detection import detect_in_video
+from utils.play_recognition import recognize_plays
 
 app = FastAPI(title="Volleyball AI Platform")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -113,7 +122,7 @@ class DetectionResult(BaseModel):
 
 @app.post("/store-results")
 async def store_results(detection: DetectionResult):
-    plays = recognize_plays(detection.detections, detection.fps)
+    plays = recognize_plays(detection.model_dump())
     results_store[detection.video_id] = {
         "detections": detection.model_dump(),
         "plays": plays,

@@ -100,9 +100,25 @@ export default function Home() {
 
     try {
       // Step 1 (Yoshi): run YOLO detection on the uploaded video
-      await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`, { method: "POST" });
+      const detectRes = await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`, { method: "POST" });
+      const detectData = detectRes.ok ? await detectRes.json() : null;
 
-      // Step 2 (Josh): fetch play recognition results
+      // Step 2: store detection results so Josh's play recognition can run
+      if (detectData) {
+        await fetch(`${API_BASE}/store-results`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            video_id: film.filename,
+            gcs_uri: film.gcs_uri,
+            fps: detectData.fps ?? 30,
+            frame_count: detectData.total_frames ?? 0,
+            detections: detectData.frame_detections ?? [],
+          }),
+        });
+      }
+
+      // Step 3 (Josh): fetch play recognition results
       const res = await fetch(`${API_BASE}/results/${encodeURIComponent(film.filename)}`);
       if (res.ok) {
         const data = await res.json();

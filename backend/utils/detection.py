@@ -9,7 +9,6 @@ from pathlib import Path as PathlibPath
 sys.path.insert(0, str(PathlibPath(__file__).parent.parent))
 
 from utils.gcs import download_from_gcs, upload_to_gcs
-from utils.play_recognition import PlayRecognizer
 from collections import defaultdict
 
 # Load trained YOLOv8m model (fine-tuned on 110 volleyball frames)
@@ -55,10 +54,7 @@ def detect_in_video(gcs_uri: str) -> dict:
 
         frame_count = 0
         processed_frames = 0
-        recognizer = PlayRecognizer(height, width)
-        prev_detections = None
-        current_play = None
-        play_start_frame = 0
+        frame_detections = []  # Per-frame data for Josh's play recognition
 
         # Setup video writer for annotated video
         output_path = Path(tmpdir) / "annotated_video.mp4"
@@ -104,20 +100,19 @@ def detect_in_video(gcs_uri: str) -> dict:
                 if has_ball:
                     detections["frames_with_ball"] += 1
 
-                # Play recognition
-                current_frame_detections = []
-                for box in boxes:
-                    x1, y1, x2, y2 = box.xyxy[0]
-                    conf = box.conf[0]
-                    cls_id = box.cls[0]
-                    current_frame_detections.append([x1.item(), y1.item(), x2.item(), y2.item(), conf.item(), cls_id.item()])
-
-                play_type, confidence = recognizer.get_play_type(current_frame_detections, prev_detections)
-
-                if play_type and confidence > 0.5:
-                    detections["plays"][play_type] += 1
-
-                prev_detections = current_frame_detections
+                # Collect per-frame data for Josh's play recognition
+                frame_detections.append({
+                    "frame": frame_count,
+                    "timestamp_sec": frame_count / fps,
+                    "objects": [
+                        {
+                            "label": "player" if int(box.cls) == 0 else "ball",
+                            "confidence": float(box.conf[0]),
+                            "bbox": [float(x) for x in box.xyxy[0]],
+                        }
+                        for box in boxes
+                    ]
+                })
 
                 # Draw boxes on frame
                 annotated_frame = results[0].plot()
@@ -150,8 +145,7 @@ def detect_in_video(gcs_uri: str) -> dict:
 
         detections["annotated_video_uri"] = annotated_gcs_uri
         detections["processed_frames"] = processed_frames
-
-        # Convert plays dict to regular dict
         detections["plays"] = dict(detections["plays"])
+        detections["frame_detections"] = frame_detections
 
         return detections
