@@ -9,6 +9,7 @@ import PlayerTrackingPanel from './components/PlayerTrackingPanel'
 import PlayTimeline from './components/PlayTimeline'
 
 const STORAGE_KEY = 'volleyball-films'
+const API_BASE = 'http://localhost:8000'
 
 const MOCK_PLAYS = [
   { id: '1', label: 'Serve', timestamp: 4 },
@@ -88,6 +89,51 @@ export default function Home() {
     })
   }
 
+  async function runDetection(film) {
+    if (!film.gcs_uri) {
+      // No GCS URI (file was just uploaded locally), use mock data
+      setTimeout(() => setAnalyzing(false), 1500)
+      setPlays(MOCK_PLAYS)
+      return
+    }
+
+    try {
+      // Call backend detection endpoint
+      const detailsRes = await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`)
+      if (!detailsRes.ok) throw new Error('Detection failed')
+
+      const detectionData = await detailsRes.json()
+
+      // Extract plays from detection results
+      const playsFromBackend = Object.entries(detectionData.plays || {}).map(([type, count]) => ({
+        id: type,
+        label: type.charAt(0).toUpperCase() + type.slice(1),
+        count,
+        timestamp: 0,
+      }))
+
+      setPlays(playsFromBackend)
+
+      // Store results in backend
+      await fetch(`${API_BASE}/store-results`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video_id: film.id,
+          gcs_uri: film.gcs_uri,
+          fps: detectionData.fps || 30,
+          frame_count: detectionData.total_frames || 0,
+          detections: [],
+        }),
+      })
+    } catch (err) {
+      console.error('Detection error:', err)
+      setPlays(MOCK_PLAYS)
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
   function openReview(film, localUrl) {
     setActiveFilm(film)
     setLocalVideoUrl(localUrl)
@@ -99,7 +145,8 @@ export default function Home() {
     setAnalyzing(true)
     setScreen('review')
 
-    setTimeout(() => setAnalyzing(false), 3000)
+    // Run detection on the video
+    runDetection(film)
   }
 
   async function handleUploadComplete(result, localUrl) {
