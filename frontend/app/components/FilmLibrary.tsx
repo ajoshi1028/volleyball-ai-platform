@@ -4,13 +4,13 @@ import { useRef, useState } from "react";
 import { FilmRecord } from "../types";
 
 const ACCEPTED_FORMATS = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"];
+
 interface Props {
   films: FilmRecord[];
   localUrls: Map<string, string>;
   onOpen: (film: FilmRecord, localUrl: string) => void;
   onReupload: (film: FilmRecord, localUrl: string) => void;
-  onUploadClick?: () => void;
-  onNewUpload?: (file: File) => void;
+  onNewUpload: (file: File) => void;
 }
 
 function formatDate(iso: string) {
@@ -24,9 +24,15 @@ function formatDuration(seconds?: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUploadClick, onNewUpload }: Props) {
+export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onNewUpload }: Props) {
+  const uploadRef = useRef<HTMLInputElement>(null);
   const reuploadRefs = useRef<Map<string, HTMLInputElement>>(new Map());
   const [dragActive, setDragActive] = useState(false);
+
+  function handleNewFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) onNewUpload(file);
+  }
 
   function handleReuploadFile(film: FilmRecord, e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -55,7 +61,7 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUp
       const file = files[0];
       const videoMimeTypes = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska"];
       if (videoMimeTypes.includes(file.type) || file.name.match(/\.(mp4|mov|avi|mkv)$/i)) {
-        onNewUpload?.(file);
+        onNewUpload(file);
       }
     }
   }
@@ -84,7 +90,7 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUp
             <p className="text-white font-semibold text-lg">No film uploaded yet</p>
             <p className="text-slate-500 text-sm max-w-xs">Upload your first practice video to start analyzing plays and tracking players.</p>
             <button
-              onClick={onUploadClick}
+              onClick={() => uploadRef.current?.click()}
               className="mt-2 px-6 py-2.5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-80"
               style={{ background: "var(--ppu-orange)" }}
             >
@@ -96,10 +102,21 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUp
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Upload card */}
           <button
-            onClick={onUploadClick}
-            className="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-all hover:border-orange-500 hover:bg-orange-500/5 cursor-pointer"
-            style={{ borderColor: "var(--ppu-border)", minHeight: "160px" }}
+            onClick={() => uploadRef.current?.click()}
+            className="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-all cursor-pointer"
+            style={{
+              borderColor: dragActive ? "var(--ppu-orange)" : "var(--ppu-border)",
+              background: dragActive ? "var(--ppu-orange-dim)" : "var(--ppu-panel)",
+              minHeight: "160px",
+            }}
           >
+            <input
+              ref={uploadRef}
+              type="file"
+              accept={ACCEPTED_FORMATS.join(",")}
+              className="hidden"
+              onChange={handleNewFile}
+            />
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center"
               style={{ background: "var(--ppu-orange-dim)" }}
@@ -156,7 +173,8 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUp
                       Open
                     </button>
                   ) : (
-                    <label className="mt-1 w-full py-1.5 rounded-lg text-xs font-semibold text-center cursor-pointer transition-colors border"
+                    <label
+                      className="mt-1 w-full py-1.5 rounded-lg text-xs font-semibold text-center cursor-pointer transition-colors border"
                       style={{ color: "var(--ppu-orange)", borderColor: "rgba(255,99,0,0.3)", background: "var(--ppu-orange-dim)" }}
                     >
                       Re-upload to view
@@ -164,7 +182,9 @@ export default function FilmLibrary({ films, localUrls, onOpen, onReupload, onUp
                         type="file"
                         accept={ACCEPTED_FORMATS.join(",")}
                         className="hidden"
-                        ref={(el) => { if (el) reuploadRefs.current.set(film.id, el); }}
+                        ref={(el) => {
+                          if (el) reuploadRefs.current.set(film.id, el);
+                        }}
                         onChange={(e) => handleReuploadFile(film, e)}
                       />
                     </label>
