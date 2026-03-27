@@ -99,11 +99,23 @@ export default function Home() {
     if (!film.gcs_uri) { setAnalyzing(false); return; }
 
     try {
-      // Step 1 (Yoshi): run YOLO detection on the uploaded video
+      // Step 1 (Yoshi): run YOLO detection + play recognition in one call
       const detectRes = await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`, { method: "POST" });
       const detectData = detectRes.ok ? await detectRes.json() : null;
 
-      // Step 2: store detection results so Josh's play recognition can run
+      // Step 2: read plays directly from detect response (recognition runs inside detect)
+      if (detectData?.play_recognition?.plays) {
+        const mapped: Play[] = (detectData.play_recognition.plays as { play: string; start_time_sec: number; end_time_sec: number }[]).map((p, i) => ({
+          id: String(i),
+          label: p.play,
+          timestamp: p.start_time_sec,
+          start_time_sec: p.start_time_sec,
+          end_time_sec: p.end_time_sec,
+        }));
+        setPlays(mapped);
+      }
+
+      // Step 3: store results for /search endpoint
       if (detectData) {
         await fetch(`${API_BASE}/store-results`, {
           method: "POST",
@@ -113,23 +125,9 @@ export default function Home() {
             gcs_uri: film.gcs_uri,
             fps: detectData.fps ?? 30,
             frame_count: detectData.total_frames ?? 0,
-            detections: detectData.frame_detections ?? [],
+            detections: [],
           }),
         });
-      }
-
-      // Step 3 (Josh): fetch play recognition results
-      const res = await fetch(`${API_BASE}/results/${encodeURIComponent(film.filename)}`);
-      if (res.ok) {
-        const data = await res.json();
-        const mapped: Play[] = (data.plays?.plays ?? []).map((p: { play: string; start_time_sec: number; end_time_sec: number }, i: number) => ({
-          id: String(i),
-          label: p.play,
-          timestamp: p.start_time_sec,
-          start_time_sec: p.start_time_sec,
-          end_time_sec: p.end_time_sec,
-        }));
-        setPlays(mapped);
       }
     } catch (err) {
       console.error("Detection/results error:", err);

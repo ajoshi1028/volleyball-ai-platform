@@ -9,10 +9,14 @@ from pathlib import Path as PathlibPath
 sys.path.insert(0, str(PathlibPath(__file__).parent.parent))
 
 from utils.gcs import download_from_gcs, upload_to_gcs
+from utils.play_recognition import recognize_plays
 from collections import defaultdict
 
-# Load trained YOLOv8m model (fine-tuned on 110 volleyball frames)
-model = YOLO('volleyball_trained.pt')
+# Load BOTH models:
+# - Pretrained YOLOv8m for reliable person detection (COCO classes)
+# - Custom-trained model for volleyball-specific ball detection
+pretrained_model = YOLO('yolov8m.pt')
+trained_model = YOLO('volleyball_trained.pt')
 
 def detect_in_video(gcs_uri: str) -> dict:
     """
@@ -39,7 +43,7 @@ def detect_in_video(gcs_uri: str) -> dict:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
         # Process frames (sample every 5th frame for speed)
-        detections = {
+        detections_stats = {
             "total_frames": total_frames,
             "fps": fps,
             "resolution": f"{width}x{height}",
@@ -49,12 +53,12 @@ def detect_in_video(gcs_uri: str) -> dict:
             "total_detections": 0,
             "frames_with_ball": 0,
             "ball_detection_rate": 0,
-            "plays": defaultdict(int),
         }
 
+        # Collect per-frame detections for play recognition
+        frames_detections = []
         frame_count = 0
         processed_frames = 0
-        frame_detections = []  # Per-frame data for Josh's play recognition
 
         # Setup video writer for annotated video
         output_path = Path(tmpdir) / "annotated_video.mp4"
@@ -68,54 +72,68 @@ def detect_in_video(gcs_uri: str) -> dict:
 
             # Process every 5th frame for speed
             if frame_count % 5 == 0:
-                # Run detection with lower confidence threshold for better ball detection
-                results = model(frame, verbose=False, conf=0.3)
+                # Use PRETRAINED model for person detection (COCO class 0 = person)
+                pretrained_results = pretrained_model(frame, verbose=False, conf=0.3)
+                pretrained_boxes = pretrained_results[0].boxes
+                person_detections = [box for box in pretrained_boxes if int(box.cls) == 0]
 
-                # Count detections (person class = 0, sports ball class = 32 in COCO)
-                boxes = results[0].boxes
-                person_detections = [box for box in boxes if int(box.cls) == 0]
-
-                # Ball detection with size filtering
+                # Use TRAINED model for ball detection (trained class 0 = Ball)
+                trained_results = trained_model(frame, verbose=False, conf=0.15)
+                trained_boxes = trained_results[0].boxes
                 ball_detections = []
-                for box in boxes:
-                    if int(box.cls) == 32:  # Sports ball class
-                        # Filter by box size (volleyball should be 10-200 pixels)
+                for box in trained_boxes:
+                    if int(box.cls) == 0:  # Ball class in trained model
                         x1, y1, x2, y2 = box.xyxy[0]
                         box_width = x2 - x1
                         box_height = y2 - y1
-                        if 10 < box_width < 300 and 10 < box_height < 300:
+                        if 5 < box_width < 300 and 5 < box_height < 300:
                             ball_detections.append(box)
 
                 detections_in_frame = len(person_detections)
                 has_ball = len(ball_detections) > 0
 
                 if detections_in_frame > 0:
-                    detections["frames_with_detections"] += 1
-                    detections["total_detections"] += detections_in_frame
-                    detections["max_people_in_frame"] = max(
-                        detections["max_people_in_frame"],
+                    detections_stats["frames_with_detections"] += 1
+                    detections_stats["total_detections"] += detections_in_frame
+                    detections_stats["max_people_in_frame"] = max(
+                        detections_stats["max_people_in_frame"],
                         detections_in_frame
                     )
 
                 if has_ball:
-                    detections["frames_with_ball"] += 1
+                    detections_stats["frames_with_ball"] += 1
 
-                # Collect per-frame data for Josh's play recognition
-                frame_detections.append({
+                # Collect frame detections for play recognition
+                frame_obj = {
                     "frame": frame_count,
                     "timestamp_sec": frame_count / fps,
-                    "objects": [
-                        {
-                            "label": "player" if int(box.cls) == 0 else "ball",
-                            "confidence": float(box.conf[0]),
-                            "bbox": [float(x) for x in box.xyxy[0]],
-                        }
-                        for box in boxes
-                    ]
-                })
+                    "objects": []
+                }
 
-                # Draw boxes on frame
-                annotated_frame = results[0].plot()
+                # Add person detections
+                for box in person_detections:
+                    x1, y1, x2, y2 = box.xyxy[0]
+                    conf = float(box.conf[0])
+                    frame_obj["objects"].append({
+                        "label": "player",
+                        "confidence": conf,
+                        "bbox": [float(x1), float(y1), float(x2), float(y2)]
+                    })
+
+                # Add ball detections
+                for box in ball_detections:
+                    x1, y1, x2, y2 = box.xyxy[0]
+                    conf = float(box.conf[0])
+                    frame_obj["objects"].append({
+                        "label": "ball",
+                        "confidence": conf,
+                        "bbox": [float(x1), float(y1), float(x2), float(y2)]
+                    })
+
+                frames_detections.append(frame_obj)
+
+                # Draw boxes on frame using pretrained model's annotations
+                annotated_frame = pretrained_results[0].plot()
                 out.write(annotated_frame)
                 processed_frames += 1
             else:
@@ -124,18 +142,27 @@ def detect_in_video(gcs_uri: str) -> dict:
             frame_count += 1
 
         # Calculate averages
-        if detections["frames_with_detections"] > 0:
-            detections["avg_people_per_detection_frame"] = round(
-                detections["total_detections"] / detections["frames_with_detections"], 2
+        if detections_stats["frames_with_detections"] > 0:
+            detections_stats["avg_people_per_detection_frame"] = round(
+                detections_stats["total_detections"] / detections_stats["frames_with_detections"], 2
             )
 
         if processed_frames > 0:
-            detections["ball_detection_rate"] = round(
-                (detections["frames_with_ball"] / processed_frames) * 100, 1
+            detections_stats["ball_detection_rate"] = round(
+                (detections_stats["frames_with_ball"] / processed_frames) * 100, 1
             )
 
         cap.release()
         out.release()
+
+        # Run play recognition on collected detections
+        play_recognition_result = recognize_plays({
+            "video_id": Path(gcs_uri).stem,
+            "gcs_uri": gcs_uri,
+            "fps": fps,
+            "frame_count": total_frames,
+            "detections": frames_detections
+        })
 
         # Upload annotated video
         annotated_gcs_uri = upload_to_gcs(
@@ -143,9 +170,10 @@ def detect_in_video(gcs_uri: str) -> dict:
             f"raw-videos/{Path(gcs_uri).stem}_annotated.mp4"
         )
 
-        detections["annotated_video_uri"] = annotated_gcs_uri
-        detections["processed_frames"] = processed_frames
-        detections["plays"] = dict(detections["plays"])
-        detections["frame_detections"] = frame_detections
+        detections_stats["annotated_video_uri"] = annotated_gcs_uri
+        detections_stats["processed_frames"] = processed_frames
+        # Return FULL play recognition (segments with timestamps + summary)
+        detections_stats["play_recognition"] = play_recognition_result
+        detections_stats["play_summary"] = play_recognition_result.get("summary", {})
 
-        return detections
+        return detections_stats
