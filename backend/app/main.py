@@ -214,12 +214,9 @@ async def search_plays(
         play_type: Type of play to search for (e.g., "serve", "block", "set", "attack", "dig")
         video_id: Optional filter to search within a specific video
         confidence_threshold: Minimum confidence score (0-1)
-<<<<<<< Updated upstream
-=======
 
     Returns:
         List of matching plays with timestamps and metadata
->>>>>>> Stashed changes
     """
     results = []
 
