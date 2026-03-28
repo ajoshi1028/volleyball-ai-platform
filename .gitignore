@@ -47,3 +47,7 @@ backend/train/
 backend/test/
 backend/valid/
 *.pt
+runs/
+
+# -------- Claude Code --------
+.claude/
