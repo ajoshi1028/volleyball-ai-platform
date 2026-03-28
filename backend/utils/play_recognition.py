@@ -59,14 +59,13 @@ def recognize_plays(detection_result: dict) -> dict:
         all_centers = [_center(p["bbox"]) for p in players]
         all_heights = [_height(p["bbox"]) for p in players]
 
-        # Filter to court area only (matches frontend border filter)
-        # x: 0.13-0.87, y: 0.38-0.88 — excludes coaches, side stands, far stands
+        # Filter to court area only — excludes coaches, side stands, far stands
         court_players = [
             (all_centers[i], all_heights[i])
             for i in range(len(players))
-            if 0.13 < all_centers[i][0] < 0.87 and 0.38 < all_centers[i][1] < 0.88
+            if 0.10 < all_centers[i][0] < 0.90 and 0.35 < all_centers[i][1] < 0.91
         ]
-        if len(court_players) < 4:
+        if len(court_players) < 3:
             frame_metrics.append(None)
             continue
 
