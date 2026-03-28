@@ -129,34 +129,33 @@ def recognize_plays(detection_result: dict) -> dict:
         near        = m["near_count"]
         max_y       = m["max_y"]
 
-        # Serve: near team spread wide in passing formation + one player
-        #        deep at baseline (server is isolated far back)
-        if near_xs > med_near_xs * 1.15 and max_y > med_max_y * 1.05:
-            labels.append("serve")
-        # Block: multiple players clustered at the net
-        elif net > med_net + 1:
-            labels.append("block")
-        # Spike: height ratio spike with net activity
-        elif hr > med_hr * 1.1 and net >= med_net:
+        # Spike: height ratio spike (someone jumping)
+        if hr > med_hr * 1.08:
             labels.append("spike")
-        # Dig: near team spread wide (passing/defensive formation)
-        elif near_xs > med_near_xs * 1.1 and near >= med_near:
+        # Block: more players at net than usual
+        elif net > med_net:
+            labels.append("block")
+        # Serve: near team spread wide in passing formation
+        elif near_xs > med_near_xs * 1.1:
+            labels.append("serve")
+        # Dig: near team spread moderately wide
+        elif near_xs > med_near_xs * 1.05 and near >= med_near:
             labels.append("dig")
-        # Set: players converging toward center (tighter than usual)
-        elif near_xs < med_near_xs * 0.85 and near >= med_near:
+        # Set: near team converging tighter than usual
+        elif near_xs < med_near_xs * 0.9:
             labels.append("set")
         else:
             labels.append(None)
 
     # ─── Step 4: Smooth with majority voting (window=5) ──────────
     smoothed = list(labels)
-    half = 2
+    half = 1
     for i in range(half, len(smoothed) - half):
         window = labels[i - half:i + half + 1]
         non_none = [w for w in window if w is not None]
-        if len(non_none) >= 3:
+        if len(non_none) >= 2:
             most_common, count = Counter(non_none).most_common(1)[0]
-            smoothed[i] = most_common if count >= 3 else None
+            smoothed[i] = most_common if count >= 2 else None
         else:
             smoothed[i] = None
 
