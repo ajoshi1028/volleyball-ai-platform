@@ -67,45 +67,33 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
               <div className="absolute top-2 bottom-2 w-px" style={{ left: "calc(50% + 22%)", background: "#1e3a4a", opacity: 0.6 }} />
 
               {/* Player dots — absolutely positioned with CSS transitions */}
-              {players.map((p) => {
-                const num = parseInt(p.id.replace("p", "")) + 1;
-                return (
-                  <div
-                    key={p.id}
-                    className="absolute flex items-center justify-center rounded-full text-white font-bold"
-                    style={{
-                      left: `${p.x * 100}%`,
-                      top: `${p.y * 100}%`,
-                      width: 18,
-                      height: 18,
-                      fontSize: 8,
-                      marginLeft: -9,
-                      marginTop: -9,
-                      background: "var(--ppu-orange)",
-                      opacity: 0.5 + p.confidence * 0.5,
-                      transition: "left 0.12s ease, top 0.12s ease, opacity 0.12s ease",
-                    }}
-                  >
-                    {num}
-                  </div>
-                );
-              })}
+              {players.map((p) => (
+                <div
+                  key={p.id}
+                  className="absolute rounded-full"
+                  style={{
+                    left: `${p.x * 100}%`,
+                    top: `${p.y * 100}%`,
+                    width: 10,
+                    height: 10,
+                    marginLeft: -5,
+                    marginTop: -5,
+                    background: "var(--ppu-orange)",
+                    opacity: 0.5 + p.confidence * 0.5,
+                    transition: "left 0.6s ease, top 0.6s ease, opacity 0.3s ease",
+                  }}
+                />
+              ))}
             </div>
 
             {/* Player list */}
             <div className="space-y-1.5">
               {players.map((p) => {
-                const num = parseInt(p.id.replace("p", "")) + 1;
                 const xLabel = p.x < 0.33 ? "Left" : p.x > 0.66 ? "Right" : "Center";
                 const yLabel = p.y < 0.4 ? "Front" : p.y > 0.7 ? "Back" : "Mid";
                 return (
                   <div key={p.id} className="flex items-center gap-2.5 rounded-lg px-3 py-2" style={{ background: "var(--ppu-card)" }}>
-                    <div
-                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-white shrink-0"
-                      style={{ background: "var(--ppu-orange)", fontSize: 9 }}
-                    >
-                      {num}
-                    </div>
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: "var(--ppu-orange)", opacity: 0.5 + p.confidence * 0.5 }} />
                     <div className="flex-1 flex items-center justify-between min-w-0">
                       <span className="text-xs text-slate-300">{yLabel} {xLabel}</span>
                       <span className="text-xs tabular-nums text-slate-500">{Math.round(p.confidence * 100)}%</span>
