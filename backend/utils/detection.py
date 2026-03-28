@@ -38,7 +38,7 @@ def _get_trained_model():
 def detect_in_video(gcs_uri: str) -> dict:
     """
     Run YOLO detection on a video from GCS.
-    Uses pretrained YOLOv8m for player detection (reliable)
+    Uses pretrained YOLO11m for player detection (reliable)
     and custom-trained model for ball detection (when available).
     """
     # Extract blob name from GCS URI
@@ -67,7 +67,7 @@ def detect_in_video(gcs_uri: str) -> dict:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Load models
+        # Load models (Yoshi: lazy loading with yolo11m.pt + volleyball_trained.pt)
         pretrained = _get_pretrained_model()
         trained = _get_trained_model()
 
@@ -100,10 +100,12 @@ def detect_in_video(gcs_uri: str) -> dict:
             # Process every 5th frame for speed
             if frame_count % 5 == 0:
                 # Person detection (COCO class 0 = person)
+                # Filter to on-court players by bbox height (Kyle's spectator filter)
+                min_player_height = height * 0.10
                 pretrained_results = pretrained(frame, verbose=False, conf=0.3)
                 person_boxes = [
                     box for box in pretrained_results[0].boxes
-                    if int(box.cls) == 0
+                    if int(box.cls) == 0 and (box.xyxy[0][3] - box.xyxy[0][1]) >= min_player_height
                 ]
 
                 # Ball detection — try trained model first, then COCO fallback
@@ -172,8 +174,6 @@ def detect_in_video(gcs_uri: str) -> dict:
                 annotated_frame = pretrained_results[0].plot()
                 out.write(annotated_frame)
                 processed_frames += 1
-            else:
-                out.write(frame)
 
             frame_count += 1
 
@@ -191,12 +191,14 @@ def detect_in_video(gcs_uri: str) -> dict:
                 (stats["frames_with_ball"] / processed_frames) * 100, 1
             )
 
-        # Run play recognition
+        # Run play recognition (Yoshi: temporal motion detection)
         play_result = recognize_plays({
             "video_id": Path(gcs_uri).stem,
             "gcs_uri": gcs_uri,
             "fps": fps,
             "frame_count": total_frames,
+            "video_width": width,
+            "video_height": height,
             "detections": frames_detections,
         })
 
@@ -211,10 +213,13 @@ def detect_in_video(gcs_uri: str) -> dict:
             stats["annotated_video_uri"] = None
 
         stats["processed_frames"] = processed_frames
+        stats["video_width"] = width
+        stats["video_height"] = height
+        stats["frames_detections"] = frames_detections
         stats["play_recognition"] = play_result
         stats["play_summary"] = play_result.get("summary", {})
 
-        # ─── Ball speed calculation ──────────────────────────────
+        # Ball speed calculation (Yoshi)
         ball_positions = []
         for fd in frames_detections:
             balls = [o for o in fd["objects"] if o["label"] == "ball"]
@@ -248,8 +253,7 @@ def detect_in_video(gcs_uri: str) -> dict:
             }
         stats["ball_positions"] = ball_positions
 
-        # ─── Sampled detection frames for frontend overlay ───────
-        # Tag key players for each play so the frontend only highlights them
+        # Sampled detection frames for frontend overlay (Yoshi)
         play_segments = play_result.get("plays", [])
         overlay_frames = []
 
@@ -266,7 +270,6 @@ def detect_in_video(gcs_uri: str) -> dict:
 
             # Include frames during plays + every 10th sampled frame for general tracking
             if active_play or fd["frame"] % 50 == 0:
-                # Mark which players are making the play
                 players_only = [o for o in fd["objects"] if o["label"] == "player"]
                 objects_out = []
                 for i, obj in enumerate(fd["objects"]):

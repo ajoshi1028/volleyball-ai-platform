@@ -1,11 +1,5 @@
 "use client";
 
-// -----------------------------------------------------------------
-// Yoshi: when /detect returns player data, pass it in via the
-// `players` prop. Update the TrackedPlayer type in ../types.ts
-// to match the actual response shape.
-// -----------------------------------------------------------------
-
 import { TrackedPlayer } from "../types";
 
 interface Props {
@@ -27,21 +21,17 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
         {analyzing ? (
-          // Skeleton loading state
-          <>
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-3 animate-pulse" style={{ background: "var(--ppu-card)" }}>
-                <div className="w-2 h-2 rounded-full shrink-0 bg-slate-700" />
-                <div className="flex-1 space-y-1.5">
-                  <div className="h-2.5 rounded bg-slate-700" style={{ width: `${50 + Math.random() * 40}%` }} />
-                  <div className="h-2 rounded bg-slate-800" style={{ width: `${30 + Math.random() * 30}%` }} />
-                </div>
+          <div className="space-y-3">
+            <div className="rounded-lg animate-pulse" style={{ background: "var(--ppu-card)", height: 120 }} />
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 animate-pulse" style={{ background: "var(--ppu-card)" }}>
+                <div className="w-5 h-5 rounded-full bg-slate-700 shrink-0" />
+                <div className="flex-1 h-2.5 rounded bg-slate-700" />
               </div>
             ))}
-          </>
+          </div>
         ) : players.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-12">
             <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "var(--ppu-card)" }}>
@@ -50,26 +40,69 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
               </svg>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Player tracking will appear<br />once detection runs
+              Player positions will appear<br />once detection runs
             </p>
           </div>
         ) : (
-          players.map((player) => (
-            <div key={player.id} className="flex items-center gap-3 rounded-lg px-3 py-2.5" style={{ background: "var(--ppu-card)" }}>
-              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: "var(--ppu-orange)" }}>
-                {(player.jersey as number) ?? "?"}
-              </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-semibold text-white">{(player.position as string) ?? "—"}</span>
-                {/* Replace with real positional data once Yoshi finalizes schema */}
-                {player.x !== undefined && (
-                  <span className="text-xs text-slate-500 tabular-nums">
-                    x {Number(player.x).toFixed(2)} · y {Number(player.y).toFixed(2)}
-                  </span>
-                )}
-              </div>
+          <>
+            {/* Player count */}
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs text-slate-500">Detected</span>
+              <span className="text-xs font-bold tabular-nums" style={{ color: "var(--ppu-orange)" }}>
+                {players.length} players
+              </span>
             </div>
-          ))
+
+            {/* Mini court — div-based so CSS transitions work on player dots */}
+            <div
+              className="relative rounded-lg overflow-hidden w-full"
+              style={{ background: "#0d1f2d", aspectRatio: "16/9" }}
+            >
+              {/* Court outline */}
+              <div className="absolute inset-2 border rounded-sm" style={{ borderColor: "#1e3a4a" }} />
+              {/* Net */}
+              <div className="absolute top-2 bottom-2 w-px" style={{ left: "50%", background: "#2a5070" }} />
+              {/* Attack lines */}
+              <div className="absolute top-2 bottom-2 w-px" style={{ left: "calc(50% - 22%)", background: "#1e3a4a", opacity: 0.6 }} />
+              <div className="absolute top-2 bottom-2 w-px" style={{ left: "calc(50% + 22%)", background: "#1e3a4a", opacity: 0.6 }} />
+
+              {/* Player dots — absolutely positioned with CSS transitions */}
+              {players.map((p) => (
+                <div
+                  key={p.id}
+                  className="absolute rounded-full"
+                  style={{
+                    left: `${p.x * 100}%`,
+                    top: `${p.y * 100}%`,
+                    width: 10,
+                    height: 10,
+                    marginLeft: -5,
+                    marginTop: -5,
+                    background: "var(--ppu-orange)",
+                    opacity: 0.5 + p.confidence * 0.5,
+                    transition: "left 1.2s ease, top 1.2s ease, opacity 0.5s ease",
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Player list */}
+            <div className="space-y-1.5">
+              {players.map((p) => {
+                const xLabel = p.x < 0.33 ? "Left" : p.x > 0.66 ? "Right" : "Center";
+                const yLabel = p.y < 0.4 ? "Front" : p.y > 0.7 ? "Back" : "Mid";
+                return (
+                  <div key={p.id} className="flex items-center gap-2.5 rounded-lg px-3 py-2" style={{ background: "var(--ppu-card)" }}>
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: "var(--ppu-orange)", opacity: 0.5 + p.confidence * 0.5 }} />
+                    <div className="flex-1 flex items-center justify-between min-w-0">
+                      <span className="text-xs text-slate-300">{yLabel} {xLabel}</span>
+                      <span className="text-xs tabular-nums text-slate-500">{Math.round(p.confidence * 100)}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>

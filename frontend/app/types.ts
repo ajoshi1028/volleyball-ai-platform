@@ -26,14 +26,16 @@ export interface DetectionFrame {
   objects: DetectedObject[];
   play?: string;           // play type active at this frame (serve, spike, etc.)
   playConfidence?: number; // how confident the classification is
+  players: TrackedPlayer[];
 }
 
 export interface TrackedPlayer {
   id: string;
+  x: number;          // normalized 0-1 (horizontal position in frame)
+  y: number;          // normalized 0-1 (vertical position in frame)
+  confidence: number;
   jersey?: number;
   position?: string;
-  x?: number;
-  y?: number;
   [key: string]: unknown;
 }
 

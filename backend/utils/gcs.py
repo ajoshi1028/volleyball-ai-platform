@@ -1,3 +1,4 @@
+import json
 import os
 from google.cloud import storage
 
@@ -10,8 +11,15 @@ CREDENTIALS_PATH = os.environ.get(
 )
 
 
-def _get_client():
-    """Create a GCS client with proper credentials."""
+def _gcs_client() -> storage.Client:
+    """
+    Build a GCS client.
+    Checks GCS_CREDENTIALS_JSON env var first (for Railway/cloud deployment),
+    then falls back to the local credentials file.
+    """
+    creds_json = os.getenv("GCS_CREDENTIALS_JSON")
+    if creds_json:
+        return storage.Client.from_service_account_info(json.loads(creds_json))
     if not os.path.exists(CREDENTIALS_PATH):
         raise FileNotFoundError(
             f"GCS credentials not found at {CREDENTIALS_PATH}. "
@@ -27,7 +35,7 @@ def upload_to_gcs(local_file_path: str, destination_blob_name: str) -> str:
     Returns:
         GCS URI (e.g., "gs://pepperdine-volleyball-2026/raw-videos/practice1.mp4")
     """
-    client = _get_client()
+    client = _gcs_client()
     bucket = client.bucket(BUCKET_NAME)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(local_file_path)
@@ -38,7 +46,7 @@ def download_from_gcs(blob_name: str, local_file_path: str) -> None:
     """
     Download a file from Google Cloud Storage.
     """
-    client = _get_client()
+    client = _gcs_client()
     bucket = client.bucket(BUCKET_NAME)
     blob = bucket.blob(blob_name)
 

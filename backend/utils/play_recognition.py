@@ -86,11 +86,13 @@ def recognize_plays(detection_result: dict) -> dict:
     detections = detection_result.get("detections", [])
     fps = detection_result.get("fps", 30.0)
     video_id = detection_result.get("video_id", "unknown")
+    vw = detection_result.get("video_width", 1920)
+    vh = detection_result.get("video_height", 1080)
 
     if len(detections) < 5:
         return {"video_id": video_id, "fps": fps, "plays": [], "summary": {}}
 
-    # ─── Step 1: Compute per-frame motion metrics ────────────────
+    # Step 1: Compute per-frame motion metrics
     frame_events = []  # List of {frame, timestamp, play, key_player_indices}
 
     for i in range(1, len(detections)):
@@ -140,7 +142,7 @@ def recognize_plays(detection_result: dict) -> dict:
         all_ys = [m["curr_y"] for m in movements]
         median_y = statistics.median(all_ys)
 
-        # ─── Detect ATTACK (jumping) ────────────────────────────
+        # Detect ATTACK (jumping)
         # Player's bbox got significantly taller = jumping
         jumpers = [m for m in movements if m["h_ratio"] > 1.12 and m["curr_y"] < median_y]
         if jumpers:
@@ -154,7 +156,7 @@ def recognize_plays(detection_result: dict) -> dict:
             })
             continue
 
-        # ─── Detect BLOCK (multiple players jumping at net) ─────
+        # Detect BLOCK (multiple players jumping at net)
         net_jumpers = [m for m in movements if m["h_ratio"] > 1.08 and m["curr_y"] < median_y - 10]
         if len(net_jumpers) >= 2:
             frame_events.append({
@@ -166,7 +168,7 @@ def recognize_plays(detection_result: dict) -> dict:
             })
             continue
 
-        # ─── Detect DIG (player crouching in back court) ────────
+        # Detect DIG (player crouching in back court)
         crouchers = [m for m in movements if m["ar_change"] > 0.08 and m["curr_y"] > median_y]
         if crouchers:
             best_croucher = max(crouchers, key=lambda m: m["ar_change"])
@@ -179,7 +181,7 @@ def recognize_plays(detection_result: dict) -> dict:
             })
             continue
 
-        # ─── Detect SERVE (one player moves while others are still) ───
+        # Detect SERVE (one player moves while others are still)
         if max_dist_player["dist"] > avg_dist * 2.5 and avg_dist < 15:
             # One player moved a lot while others barely moved
             if max_dist_player["curr_y"] > median_y:  # Back court
@@ -192,7 +194,7 @@ def recognize_plays(detection_result: dict) -> dict:
                 })
                 continue
 
-        # ─── Detect SET (front player with slight height increase) ───
+        # Detect SET (front player with slight height increase)
         front_risers = [m for m in movements if m["h_ratio"] > 1.05 and m["curr_y"] < median_y and m["dist"] > 5]
         if front_risers:
             best = max(front_risers, key=lambda m: m["h_ratio"])
@@ -205,10 +207,10 @@ def recognize_plays(detection_result: dict) -> dict:
             })
             continue
 
-    # ─── Step 2: Merge consecutive same-type events into segments ─
+    # Step 2: Merge consecutive same-type events into segments
     segments = _merge_events(frame_events, fps)
 
-    # ─── Step 3: Summary ─────────────────────────────────────────
+    # Step 3: Summary
     summary = {}
     for seg in segments:
         summary[seg["play"]] = summary.get(seg["play"], 0) + 1
