@@ -10,7 +10,7 @@ import PlayTimeline from "./components/PlayTimeline";
 import { DetectionFrame, FilmRecord, Play, TrackedPlayer, UploadResponse } from "./types";
 
 const STORAGE_KEY = "volleyball-films";
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const MOCK_PLAYS: Play[] = [
   { id: "1", label: "Serve",  timestamp: 4,  start_time_sec: 4,  end_time_sec: 6  },

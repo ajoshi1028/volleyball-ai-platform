@@ -6,4 +6,4 @@ python-dotenv==1.0.0
 pydantic==2.7.0
 pydantic-settings==2.3.0
 ultralytics
-opencv-python
+opencv-python-headless
