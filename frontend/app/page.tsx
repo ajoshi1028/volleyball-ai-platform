@@ -130,6 +130,7 @@ export default function Home() {
     try {
       const res = await fetch(`${API}/detect?gcs_uri=${encodeURIComponent(gcsUri)}`, {
         method: "POST",
+        signal: AbortSignal.timeout(300000),
       });
       if (!res.ok) {
         const errText = await res.text();
