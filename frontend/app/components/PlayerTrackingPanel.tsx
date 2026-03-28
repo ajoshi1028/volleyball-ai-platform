@@ -9,9 +9,6 @@ interface Props {
 }
 
 export default function PlayerTrackingPanel({ players, currentTime, analyzing }: Props) {
-  const courtW = 220;
-  const courtH = 124;
-
   return (
     <div className="flex flex-col h-full border-l" style={{ background: "var(--ppu-panel)", borderColor: "var(--ppu-border)" }}>
       {/* Header */}
@@ -27,7 +24,7 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
         {analyzing ? (
           <div className="space-y-3">
-            <div className="rounded-lg animate-pulse" style={{ background: "var(--ppu-card)", height: 124 }} />
+            <div className="rounded-lg animate-pulse" style={{ background: "var(--ppu-card)", height: 120 }} />
             {[1, 2, 3, 4].map((i) => (
               <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 animate-pulse" style={{ background: "var(--ppu-card)" }}>
                 <div className="w-5 h-5 rounded-full bg-slate-700 shrink-0" />
@@ -56,33 +53,40 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
               </span>
             </div>
 
-            {/* Mini court view */}
-            <div className="rounded-lg overflow-hidden" style={{ background: "var(--ppu-card)" }}>
-              <svg width={courtW} height={courtH} viewBox={`0 0 ${courtW} ${courtH}`} className="w-full">
-                {/* Court background */}
-                <rect x={0} y={0} width={courtW} height={courtH} fill="#0d1f2d" />
-                {/* Court outline */}
-                <rect x={8} y={8} width={courtW - 16} height={courtH - 16} fill="none" stroke="#1e3a4a" strokeWidth={1.5} />
-                {/* Net */}
-                <line x1={courtW / 2} y1={8} x2={courtW / 2} y2={courtH - 8} stroke="#2a5070" strokeWidth={2} />
-                {/* Attack lines */}
-                <line x1={courtW / 2 - 40} y1={8} x2={courtW / 2 - 40} y2={courtH - 8} stroke="#1e3a4a" strokeWidth={1} strokeDasharray="3 3" />
-                <line x1={courtW / 2 + 40} y1={8} x2={courtW / 2 + 40} y2={courtH - 8} stroke="#1e3a4a" strokeWidth={1} strokeDasharray="3 3" />
-                {/* Player dots */}
-                {players.map((p, i) => {
-                  const cx = 8 + p.x * (courtW - 16);
-                  const cy = 8 + p.y * (courtH - 16);
-                  const opacity = 0.5 + p.confidence * 0.5;
-                  return (
-                    <g key={p.id}>
-                      <circle cx={cx} cy={cy} r={5} fill="#ff6300" opacity={opacity} />
-                      <text x={cx} y={cy + 4} textAnchor="middle" fontSize={5} fill="white" fontWeight="bold">
-                        {i + 1}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
+            {/* Mini court — div-based so CSS transitions work on player dots */}
+            <div
+              className="relative rounded-lg overflow-hidden w-full"
+              style={{ background: "#0d1f2d", aspectRatio: "16/9" }}
+            >
+              {/* Court outline */}
+              <div className="absolute inset-2 border rounded-sm" style={{ borderColor: "#1e3a4a" }} />
+              {/* Net */}
+              <div className="absolute top-2 bottom-2 w-px" style={{ left: "50%", background: "#2a5070" }} />
+              {/* Attack lines */}
+              <div className="absolute top-2 bottom-2 w-px" style={{ left: "calc(50% - 22%)", background: "#1e3a4a", opacity: 0.6 }} />
+              <div className="absolute top-2 bottom-2 w-px" style={{ left: "calc(50% + 22%)", background: "#1e3a4a", opacity: 0.6 }} />
+
+              {/* Player dots — absolutely positioned with CSS transitions */}
+              {players.map((p, i) => (
+                <div
+                  key={p.id}
+                  className="absolute flex items-center justify-center rounded-full text-white font-bold"
+                  style={{
+                    left: `${p.x * 100}%`,
+                    top: `${p.y * 100}%`,
+                    width: 18,
+                    height: 18,
+                    fontSize: 8,
+                    marginLeft: -9,
+                    marginTop: -9,
+                    background: "var(--ppu-orange)",
+                    opacity: 0.5 + p.confidence * 0.5,
+                    transition: "left 0.12s ease, top 0.12s ease, opacity 0.12s ease",
+                  }}
+                >
+                  {i + 1}
+                </div>
+              ))}
             </div>
 
             {/* Player list */}

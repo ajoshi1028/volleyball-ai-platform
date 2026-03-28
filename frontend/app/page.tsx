@@ -61,7 +61,13 @@ export default function Home() {
 
   const currentPlayers: TrackedPlayer[] = mockMode
     ? MOCK_PLAYERS
-    : detectionFrames.find((f) => Math.abs(f.timestamp - currentTime) < 0.1)?.players ?? [];
+    : (() => {
+        if (!detectionFrames.length) return [];
+        const closest = detectionFrames.reduce((best, f) =>
+          Math.abs(f.timestamp - currentTime) < Math.abs(best.timestamp - currentTime) ? f : best
+        );
+        return closest.players;
+      })();
 
   const activePlays = mockMode ? MOCK_PLAYS : plays;
 
@@ -123,12 +129,18 @@ export default function Home() {
           timestamp: f.timestamp_sec,
           players: f.objects
             .filter((o) => o.label === "player")
+            .map((o) => ({
+              nx: ((o.bbox[0] + o.bbox[2]) / 2) / vw,
+              ny: ((o.bbox[1] + o.bbox[3]) / 2) / vh,
+              confidence: o.confidence,
+            }))
+            .filter((o) => o.nx > 0.07 && o.nx < 0.93 && o.ny > 0.07 && o.ny < 0.93)
             .sort((a, b) => b.confidence - a.confidence)
             .slice(0, 14)
             .map((o, i) => ({
               id: `p${i}`,
-              x: ((o.bbox[0] + o.bbox[2]) / 2) / vw,
-              y: ((o.bbox[1] + o.bbox[3]) / 2) / vh,
+              x: o.nx,
+              y: o.ny,
               confidence: o.confidence,
             })),
         }));
