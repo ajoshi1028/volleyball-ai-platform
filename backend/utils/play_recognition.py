@@ -58,14 +58,23 @@ def recognize_plays(detection_result: dict) -> dict:
             frame_metrics.append(None)
             continue
 
-        centers = [_center(p["bbox"]) for p in players]
-        heights = [_height(p["bbox"]) for p in players]
-        # Normalize to 0-1 range
-        ys = [c[1] / vh for c in centers]
-        xs = [c[0] / vw for c in centers]
+        # Filter to middle 50% horizontally and normalize
+        filtered = [
+            ((p["bbox"][0] + p["bbox"][2]) / 2 / vw,
+             (p["bbox"][1] + p["bbox"][3]) / 2 / vh,
+             p["bbox"][3] - p["bbox"][1])
+            for p in players
+            if 0.25 < (p["bbox"][0] + p["bbox"][2]) / 2 / vw < 0.75
+        ]
+        if len(filtered) < 3:
+            frame_metrics.append(None)
+            continue
 
-        med_h = statistics.median(heights)
-        max_h = max(heights)
+        xs      = [f[0] for f in filtered]
+        ys      = [f[1] for f in filtered]
+        heights = [f[2] for f in filtered]
+        med_h   = statistics.median(heights)
+        max_h   = max(heights)
 
         # Net is at ~y=0.44 of frame from end-zone camera
         # Split by court depth (y position in frame)
