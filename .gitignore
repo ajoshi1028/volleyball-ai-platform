@@ -36,6 +36,10 @@ backend/*.log
 .idea/
 *.swp
 *.swo
-*~backend/training_output/
+*~
+
+# -------- Training Data & Models --------
+backend/training_output/
 backend/roboflow_dataset/
 backend/yolo_dataset/
+*.pt
