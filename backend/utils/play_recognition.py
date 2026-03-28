@@ -137,6 +137,12 @@ def recognize_plays(detection_result: dict) -> dict:
         else:
             labels.append(None)
 
+    # ─── Debug: print per-frame labels and key metrics ───────────
+    print(f"\n[play_recognition] baselines: hr={med_hr:.2f} near_xs={med_near_xs:.2f} net={med_net:.1f} near={med_near:.1f}")
+    for m, label in zip(frame_metrics, labels):
+        if m:
+            print(f"  t={m['timestamp']:.1f}s hr={m['height_ratio']:.2f} near_xs={m['near_x_spread']:.2f} net={m['net_count']} near={m['near_count']} → {label}")
+
     # ─── Step 4: Smooth with majority voting (window=5) ──────────
     smoothed = list(labels)
     half = 1
