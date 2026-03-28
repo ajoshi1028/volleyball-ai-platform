@@ -104,34 +104,37 @@ def recognize_plays(detection_result: dict) -> dict:
         ysp = m["y_spread"]
         np_ = m["num_players"]
 
-        # Spike: someone jumping (height ratio spike)
-        if hr > med_hr * 1.05 and fwd >= med_fwd:
+        # Spike: someone jumping (height ratio above median)
+        if hr > med_hr * 1.1 and fwd >= med_fwd:
             labels.append("spike")
-        # Block: more players forward than usual, tight Y spread
-        elif fwd > med_fwd + 1 and ysp < med_ysp * 0.9:
+        # Block: more players forward, somewhat tight Y spread
+        elif fwd > med_fwd + 1 and ysp < med_ysp * 0.95:
             labels.append("block")
-        # Serve: fewer players than usual (players rotating), or back-heavy
-        elif np_ < med_np - 1 or bck > med_bck + 2:
+        # Serve: back-heavy formation
+        elif bck > med_bck + 2:
             labels.append("serve")
-        # Dig: back-heavy, spread Y
+        # Dig: more players back with wider Y spread
         elif bck > fwd + 1 and ysp > med_ysp * 1.05:
             labels.append("dig")
-        # Set: balanced forward/back, moderate spread
+        # Set: roughly balanced positioning
         elif abs(fwd - bck) <= 1:
             labels.append("set")
         else:
             labels.append(None)
 
     # ─── Step 4: Smooth labels (remove noise) ────────────────────
-    # Apply majority voting in sliding window of 3
+    # Apply majority voting in sliding window of 5
+    from collections import Counter
     smoothed = list(labels)
-    for i in range(1, len(smoothed) - 1):
-        window = [labels[i-1], labels[i], labels[i+1]]
+    half = 2
+    for i in range(half, len(smoothed) - half):
+        window = labels[i - half:i + half + 1]
         non_none = [w for w in window if w is not None]
-        if non_none:
-            from collections import Counter
-            most_common = Counter(non_none).most_common(1)[0][0]
-            smoothed[i] = most_common
+        if len(non_none) >= 3:  # require majority to agree
+            most_common, count = Counter(non_none).most_common(1)[0]
+            smoothed[i] = most_common if count >= 3 else None
+        else:
+            smoothed[i] = None
 
     # ─── Step 5: Merge into segments ─────────────────────────────
     segments = []
@@ -150,7 +153,7 @@ def recognize_plays(detection_result: dict) -> dict:
         end_idx = i - 1
         run_len = end_idx - start_idx + 1
 
-        if run_len >= 2:  # minimum 2 frames
+        if run_len >= 3:  # minimum 3 detected frames (~0.5 seconds at every-10th-frame sampling)
             start_m = frame_metrics[start_idx]
             end_m = frame_metrics[end_idx]
             if start_m and end_m:
