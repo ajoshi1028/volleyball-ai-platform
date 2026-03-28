@@ -128,22 +128,22 @@ def recognize_plays(detection_result: dict) -> dict:
         near        = m["near_count"]
         max_y       = m["max_y"]
 
-        # Spike: clear jump (high hr) OR moderate jump with lots of net activity
+        # Spike: clear jump OR moderate jump with lots of net activity
         if hr > med_hr * 1.1:
             labels.append("spike")
-        elif hr > med_hr * 1.0 and net > med_net + 1:
+        elif hr > med_hr and net > med_net + 1:
             labels.append("spike")
-        # Block: clearly more players at net than usual (needs 2 above median)
+        # Block: clearly more players at net than usual
         elif net > med_net + 1:
             labels.append("block")
-        # Serve: near team spread wide in passing formation
-        elif near_xs > med_near_xs * 1.1:
+        # Serve: near team clearly spread wide (needs near >= 2 to measure)
+        elif near >= 2 and near_xs > med_near_xs * 1.5:
             labels.append("serve")
-        # Dig: near team spread moderately wide
-        elif near_xs > med_near_xs * 1.05 and near >= med_near:
+        # Dig: near team moderately spread
+        elif near >= 2 and near_xs > med_near_xs * 1.2 and near >= med_near:
             labels.append("dig")
-        # Set: near team converging tighter than usual
-        elif near_xs < med_near_xs * 0.9:
+        # Set: near team converging — only when we have enough near players to measure
+        elif near >= 2 and near_xs < med_near_xs * 0.9:
             labels.append("set")
         else:
             labels.append(None)
