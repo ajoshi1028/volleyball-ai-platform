@@ -72,7 +72,12 @@ def detect_in_video(gcs_uri: str) -> dict:
                 # Use PRETRAINED model for person detection (COCO class 0 = person)
                 pretrained_results = pretrained_model(frame, verbose=False, conf=0.3)
                 pretrained_boxes = pretrained_results[0].boxes
-                person_detections = [box for box in pretrained_boxes if int(box.cls) == 0]
+                # Filter to on-court players by bbox height (spectators in stands appear much smaller)
+                min_player_height = height * 0.10  # must be at least 10% of frame height
+                person_detections = [
+                    box for box in pretrained_boxes
+                    if int(box.cls) == 0 and (box.xyxy[0][3] - box.xyxy[0][1]) >= min_player_height
+                ]
 
                 # Use TRAINED model for ball detection (trained class 0 = Ball)
                 trained_results = trained_model(frame, verbose=False, conf=0.05)
@@ -151,6 +156,8 @@ def detect_in_video(gcs_uri: str) -> dict:
             "gcs_uri": gcs_uri,
             "fps": fps,
             "frame_count": total_frames,
+            "video_width": width,
+            "video_height": height,
             "detections": frames_detections
         })
 

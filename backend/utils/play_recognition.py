@@ -44,6 +44,8 @@ def recognize_plays(detection_result: dict) -> dict:
     detections = detection_result.get("detections", [])
     fps = detection_result.get("fps", 30.0)
     video_id = detection_result.get("video_id", "unknown")
+    vw = detection_result.get("video_width", 1920)
+    vh = detection_result.get("video_height", 1080)
 
     if not detections:
         return {"video_id": video_id, "fps": fps, "plays": [], "summary": {}}
@@ -56,23 +58,11 @@ def recognize_plays(detection_result: dict) -> dict:
             frame_metrics.append(None)
             continue
 
-        all_centers = [_center(p["bbox"]) for p in players]
-        all_heights = [_height(p["bbox"]) for p in players]
-
-        # Filter to court area only — excludes coaches, side stands, far stands
-        court_players = [
-            (all_centers[i], all_heights[i])
-            for i in range(len(players))
-            if 0.10 < all_centers[i][0] < 0.90 and 0.35 < all_centers[i][1] < 0.91
-        ]
-        if len(court_players) < 3:
-            frame_metrics.append(None)
-            continue
-
-        centers = [cp[0] for cp in court_players]
-        heights = [cp[1] for cp in court_players]
-        ys = [c[1] for c in centers]
-        xs = [c[0] for c in centers]
+        centers = [_center(p["bbox"]) for p in players]
+        heights = [_height(p["bbox"]) for p in players]
+        # Normalize to 0-1 range
+        ys = [c[1] / vh for c in centers]
+        xs = [c[0] / vw for c in centers]
 
         med_h = statistics.median(heights)
         max_h = max(heights)
