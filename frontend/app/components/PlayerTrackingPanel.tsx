@@ -80,7 +80,7 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
                     marginTop: -5,
                     background: "var(--ppu-orange)",
                     opacity: 0.5 + p.confidence * 0.5,
-                    transition: "left 0.6s ease, top 0.6s ease, opacity 0.3s ease",
+                    transition: "left 1.2s ease, top 1.2s ease, opacity 0.5s ease",
                   }}
                 />
               ))}

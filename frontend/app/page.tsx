@@ -138,7 +138,7 @@ export default function Home() {
             .filter((o) => o.x > 0.13 && o.x < 0.87 && o.y > 0.38 && o.y < 0.88)
             .sort((a, b) => b.confidence - a.confidence)
             .slice(0, 14)
-            .sort((a, b) => a.x - b.x)  // stable sort by x so same div animates between positions
+            .sort((a, b) => a.y - b.y)  // stable sort by y (court depth) so same div animates smoothly
             .map((o, i) => ({ id: `p${i}`, x: o.x, y: o.y, confidence: o.confidence })),
         }));
 
