@@ -21,12 +21,12 @@ const MOCK_PLAYS: Play[] = [
 ];
 
 const MOCK_PLAYERS: TrackedPlayer[] = [
-  { id: "p1", jersey: 3,  position: "OH", x: 0.24, y: 0.61 },
-  { id: "p2", jersey: 7,  position: "S",  x: 0.51, y: 0.55 },
-  { id: "p3", jersey: 11, position: "MB", x: 0.38, y: 0.48 },
-  { id: "p4", jersey: 14, position: "L",  x: 0.67, y: 0.72 },
-  { id: "p5", jersey: 2,  position: "OH", x: 0.19, y: 0.43 },
-  { id: "p6", jersey: 9,  position: "RS", x: 0.79, y: 0.51 },
+  { id: "p1", jersey: 3,  position: "OH", x: 0.24, y: 0.61, confidence: 0.95 },
+  { id: "p2", jersey: 7,  position: "S",  x: 0.51, y: 0.55, confidence: 0.93 },
+  { id: "p3", jersey: 11, position: "MB", x: 0.38, y: 0.48, confidence: 0.91 },
+  { id: "p4", jersey: 14, position: "L",  x: 0.67, y: 0.72, confidence: 0.94 },
+  { id: "p5", jersey: 2,  position: "OH", x: 0.19, y: 0.43, confidence: 0.92 },
+  { id: "p6", jersey: 9,  position: "RS", x: 0.79, y: 0.51, confidence: 0.90 },
 ];
 
 type Screen = "library" | "upload" | "review";
@@ -128,6 +128,7 @@ export default function Home() {
         const frames: DetectionFrame[] = (detectData.frames_detections as { frame: number; timestamp_sec: number; objects: { label: string; confidence: number; bbox: number[] }[] }[]).map((f) => ({
           frame: f.frame,
           timestamp: f.timestamp_sec,
+          objects: f.objects.map((o) => ({ label: o.label as "player" | "ball", confidence: o.confidence, bbox: o.bbox as [number, number, number, number] })),
           players: f.objects
             .filter((o) => o.label === "player")
             .map((o) => ({
@@ -215,7 +216,18 @@ function handleSeek(time: number) {
           localUrls={localUrls}
           onOpen={(film, url) => openReview(film, url)}
           onReupload={(film, url) => { localUrls.set(film.id, url); openReview(film, url); }}
-          onUploadClick={() => setScreen("upload")}
+          onNewUpload={(file: File) => {
+            const localUrl = URL.createObjectURL(file);
+            const film: FilmRecord = {
+              id: crypto.randomUUID(),
+              filename: file.name,
+              gcs_uri: "",
+              uploadedAt: new Date().toISOString(),
+            };
+            setFilms((prev) => [film, ...prev]);
+            localUrls.set(film.id, localUrl);
+            openReview(film, localUrl);
+          }}
         />
       </div>
     );
@@ -245,6 +257,7 @@ function handleSeek(time: number) {
               ref={playerRef}
               src={localVideoUrl}
               detections={detectionFrames}
+              plays={activePlays}
               analyzing={analyzing}
               onTimeUpdate={setCurrentTime}
               onDurationChange={setVideoDuration}
