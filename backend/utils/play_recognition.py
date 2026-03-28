@@ -92,6 +92,36 @@ def recognize_plays(detection_result: dict) -> dict:
     if len(detections) < 5:
         return {"video_id": video_id, "fps": fps, "plays": [], "summary": {}}
 
+    # Step 0: Collect direct play detections from the trained model (if available)
+    # These are higher-confidence since they come from labeled data
+    direct_events = []
+    for fd in detections:
+        direct_plays = fd.get("direct_plays", [])
+        if direct_plays:
+            frame_num = fd.get("frame", 0)
+            timestamp = fd.get("timestamp_sec", frame_num / fps)
+            # Find the player closest to the play detection bbox
+            players = _find_players(fd)
+            for dp in direct_plays:
+                dp_center = ((dp["bbox"][0] + dp["bbox"][2]) / 2,
+                             (dp["bbox"][1] + dp["bbox"][3]) / 2)
+                closest_idx = 0
+                closest_dist = float("inf")
+                for pi, p in enumerate(players):
+                    pc = _center(p["bbox"])
+                    d = _distance(dp_center, pc)
+                    if d < closest_dist:
+                        closest_dist = d
+                        closest_idx = pi
+                direct_events.append({
+                    "frame": frame_num,
+                    "timestamp": timestamp,
+                    "play": dp["play"],
+                    "key_players": [closest_idx],
+                    "confidence": dp["confidence"],
+                    "source": "model",
+                })
+
     # Step 1: Compute per-frame motion metrics
     frame_events = []  # List of {frame, timestamp, play, key_player_indices}
 
@@ -207,8 +237,26 @@ def recognize_plays(detection_result: dict) -> dict:
             })
             continue
 
+    # Combine direct model detections with motion-based detections
+    # Direct model detections take priority (higher confidence)
+    all_events = direct_events + frame_events
+    all_events.sort(key=lambda e: e["frame"])
+
+    # Deduplicate: if model detection exists within 5 frames, skip motion-based
+    if direct_events:
+        direct_frames = {e["frame"] for e in direct_events}
+        filtered = []
+        for evt in all_events:
+            if evt.get("source") == "model":
+                filtered.append(evt)
+            else:
+                # Keep motion event only if no direct detection within 10 frames
+                if not any(abs(evt["frame"] - df) < 10 for df in direct_frames):
+                    filtered.append(evt)
+        all_events = filtered
+
     # Step 2: Merge consecutive same-type events into segments
-    segments = _merge_events(frame_events, fps)
+    segments = _merge_events(all_events, fps)
 
     # Step 3: Summary
     summary = {}

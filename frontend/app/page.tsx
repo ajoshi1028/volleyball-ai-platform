@@ -1,40 +1,32 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import Nav from "./components/Nav";
 import FilmLibrary from "./components/FilmLibrary";
-import VideoUploader from "./components/VideoUploader";
 import VideoPlayer, { VideoPlayerHandle } from "./components/VideoPlayer";
-import PlayerTrackingPanel from "./components/PlayerTrackingPanel";
+import StatsPanel from "./components/StatsPanel";
 import PlayTimeline from "./components/PlayTimeline";
-import { DetectionFrame, FilmRecord, Play, TrackedPlayer, UploadResponse } from "./types";
+import {
+  DetectionFrame,
+  FilmRecord,
+  Play,
+  TrackedPlayer,
+  VideoStats,
+  UploadResponse,
+} from "./types";
 
 const STORAGE_KEY = "volleyball-films";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-const MOCK_PLAYS: Play[] = [
-  { id: "1", label: "Serve",  timestamp: 4,  start_time_sec: 4,  end_time_sec: 6  },
-  { id: "2", label: "Dig",   timestamp: 11, start_time_sec: 11, end_time_sec: 13 },
-  { id: "3", label: "Set",   timestamp: 18, start_time_sec: 18, end_time_sec: 20 },
-  { id: "4", label: "Spike", timestamp: 24, start_time_sec: 24, end_time_sec: 26 },
-  { id: "5", label: "Block", timestamp: 31, start_time_sec: 31, end_time_sec: 33 },
-];
-
-const MOCK_PLAYERS: TrackedPlayer[] = [
-  { id: "p1", jersey: 3,  position: "OH", x: 0.24, y: 0.61, confidence: 0.95 },
-  { id: "p2", jersey: 7,  position: "S",  x: 0.51, y: 0.55, confidence: 0.93 },
-  { id: "p3", jersey: 11, position: "MB", x: 0.38, y: 0.48, confidence: 0.91 },
-  { id: "p4", jersey: 14, position: "L",  x: 0.67, y: 0.72, confidence: 0.94 },
-  { id: "p5", jersey: 2,  position: "OH", x: 0.19, y: 0.43, confidence: 0.92 },
-  { id: "p6", jersey: 9,  position: "RS", x: 0.79, y: 0.51, confidence: 0.90 },
-];
-
-type Screen = "library" | "upload" | "review";
+type Screen = "library" | "review";
 
 function loadFilms(): FilmRecord[] {
+  if (typeof window === "undefined") return [];
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function saveFilms(films: FilmRecord[]) {
@@ -43,221 +35,375 @@ function saveFilms(films: FilmRecord[]) {
 
 export default function Home() {
   const playerRef = useRef<VideoPlayerHandle>(null);
-
   const [screen, setScreen] = useState<Screen>("library");
   const [films, setFilms] = useState<FilmRecord[]>([]);
-  const [localUrls] = useState(() => new Map<string, string>());
+  const localUrlsRef = useRef(new Map<string, string>());
 
+  // Review state
   const [activeFilm, setActiveFilm] = useState<FilmRecord | null>(null);
   const [localVideoUrl, setLocalVideoUrl] = useState("");
   const [detectionFrames, setDetectionFrames] = useState<DetectionFrame[]>([]);
   const [plays, setPlays] = useState<Play[]>([]);
+  const [videoStats, setVideoStats] = useState<VideoStats | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
-  const [mockMode, setMockMode] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => { setFilms(loadFilms()); }, []);
+  useEffect(() => {
+    setFilms(loadFilms());
+  }, []);
 
-  const currentPlayers: TrackedPlayer[] = mockMode
-    ? MOCK_PLAYERS
-    : (() => {
-        if (!detectionFrames.length) return [];
-        const closest = detectionFrames.reduce((best, f) =>
-          Math.abs(f.timestamp - currentTime) < Math.abs(best.timestamp - currentTime) ? f : best
-        );
-        return closest.players;
-      })();
+  // Current players from detection frames based on video time
+  const currentPlayers: TrackedPlayer[] = (() => {
+    if (!detectionFrames.length) return [];
+    const closest = detectionFrames.reduce((best, f) =>
+      Math.abs(f.timestamp - currentTime) < Math.abs(best.timestamp - currentTime) ? f : best
+    );
+    return closest.players;
+  })();
 
-  const activePlays = mockMode ? MOCK_PLAYS : plays;
-
-  // Save duration + thumbnail back to the film record once we have them
+  // Save duration back to film record
   useEffect(() => {
     if (!activeFilm || !videoDuration) return;
     setFilms((prev) => {
-      const updated = prev.map((f) => f.id === activeFilm.id ? { ...f, duration: videoDuration } : f);
+      const updated = prev.map((f) =>
+        f.id === activeFilm.id ? { ...f, duration: videoDuration } : f
+      );
       saveFilms(updated);
       return updated;
     });
-  }, [videoDuration]);
+  }, [videoDuration, activeFilm]);
 
-  function handleThumbnail(dataUrl: string) {
-    if (!activeFilm) return;
-    setFilms((prev) => {
-      const updated = prev.map((f) => f.id === activeFilm.id ? { ...f, thumbnail: dataUrl } : f);
-      saveFilms(updated);
-      return updated;
-    });
+  const handleThumbnail = useCallback(
+    (dataUrl: string) => {
+      if (!activeFilm) return;
+      setFilms((prev) => {
+        const updated = prev.map((f) =>
+          f.id === activeFilm.id ? { ...f, thumbnail: dataUrl } : f
+        );
+        saveFilms(updated);
+        return updated;
+      });
+    },
+    [activeFilm]
+  );
+
+  // ─── Check backend is reachable ─────────────────────────────
+  async function checkBackend(): Promise<boolean> {
+    try {
+      const res = await fetch(`${API}/health`, { signal: AbortSignal.timeout(5000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
-  async function openReview(film: FilmRecord, localUrl: string) {
-    setActiveFilm(film);
-    setLocalVideoUrl(localUrl);
-    setDetectionFrames([]);
-    setPlays([]);
-    setCurrentTime(0);
-    setVideoDuration(0);
-    setMockMode(false);
-    setAnalyzing(true);
-    setScreen("review");
+  // ─── Upload to GCS ──────────────────────────────────────────
+  async function uploadToGCS(file: File): Promise<UploadResponse> {
+    // Pre-flight: make sure backend is reachable
+    const backendOk = await checkBackend();
+    if (!backendOk) {
+      throw new Error(
+        "Cannot connect to backend server. Make sure the backend is running:\n" +
+        "cd backend && source venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      );
+    }
 
-    // Skip API calls if no GCS URI (dev/local preview mode)
-    if (!film.gcs_uri) { setAnalyzing(false); return; }
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API}/upload-video`, { method: "POST", body: form });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Upload failed (${res.status}): ${errText}`);
+    }
+    return (await res.json()) as UploadResponse;
+  }
+
+  // ─── Run AI Detection ───────────────────────────────────────
+  async function runDetection(gcsUri: string) {
+    setAnalyzing(true);
+    setStatusMessage("Running AI analysis — detecting players, ball, and plays...");
+    setErrorMessage(null);
 
     try {
-      // Step 1 (Yoshi): run YOLO detection + play recognition in one call
-      const detectRes = await fetch(`${API_BASE}/detect?gcs_uri=${encodeURIComponent(film.gcs_uri)}`, { method: "POST" });
-      const detectData = detectRes.ok ? await detectRes.json() : null;
+      const res = await fetch(`${API}/detect?gcs_uri=${encodeURIComponent(gcsUri)}`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Detection failed (${res.status}): ${errText}`);
+      }
+      const data = await res.json();
 
-      // Step 2: read plays + per-frame player positions from detect response
-      if (detectData?.play_recognition?.plays) {
-        const mapped: Play[] = (detectData.play_recognition.plays as { play: string; start_time_sec: number; end_time_sec: number }[]).map((p, i) => ({
-          id: String(i),
-          label: p.play,
-          timestamp: p.start_time_sec,
-          start_time_sec: p.start_time_sec,
-          end_time_sec: p.end_time_sec,
-        }));
+      // Parse plays
+      if (data?.play_recognition?.plays) {
+        const mapped: Play[] = data.play_recognition.plays.map(
+          (
+            p: {
+              play: string;
+              start_time_sec: number;
+              end_time_sec: number;
+              confidence?: number;
+            },
+            i: number
+          ) => ({
+            id: String(i),
+            label: p.play,
+            timestamp: p.start_time_sec,
+            confidence: p.confidence,
+            start_time_sec: p.start_time_sec,
+            end_time_sec: p.end_time_sec,
+          })
+        );
         setPlays(mapped);
       }
 
-      if (detectData?.frames_detections) {
-        const vw: number = detectData.video_width ?? 1920;
-        const vh: number = detectData.video_height ?? 1080;
+      // Parse detection frames for overlay
+      if (data?.detection_frames) {
+        const vw: number = data.video_width ?? 1920;
+        const vh: number = data.video_height ?? 1080;
 
-        const frames: DetectionFrame[] = (detectData.frames_detections as { frame: number; timestamp_sec: number; objects: { label: string; confidence: number; bbox: number[] }[] }[]).map((f) => ({
-          frame: f.frame,
-          timestamp: f.timestamp_sec,
-          objects: f.objects.map((o) => ({ label: o.label as "player" | "ball", confidence: o.confidence, bbox: o.bbox as [number, number, number, number] })),
-          players: f.objects
-            .filter((o) => o.label === "player")
-            .map((o) => ({
-              x: ((o.bbox[0] + o.bbox[2]) / 2) / vw,
-              y: ((o.bbox[1] + o.bbox[3]) / 2) / vh,
+        const frames: DetectionFrame[] = data.detection_frames.map(
+          (f: { frame: number; timestamp: number; objects: any[]; play?: string }) => ({
+            frame: f.frame,
+            timestamp: f.timestamp,
+            objects: f.objects.map((o: any) => ({
+              label: o.label as "player" | "ball",
               confidence: o.confidence,
-            }))
-            .filter((o) => o.x > 0.13 && o.x < 0.87 && o.y > 0.38 && o.y < 0.88)
-            .sort((a, b) => b.confidence - a.confidence)
-            .slice(0, 14)
-            .sort((a, b) => a.y - b.y)  // stable sort by y (court depth) so same div animates smoothly
-            .map((o, i) => ({ id: `p${i}`, x: o.x, y: o.y, confidence: o.confidence })),
-        }));
-
+              bbox: o.bbox as [number, number, number, number],
+              is_key_player: o.is_key_player || false,
+              play: o.play,
+            })),
+            players: f.objects
+              .filter((o: any) => o.label === "player")
+              .map((o: any) => ({
+                x: (o.bbox[0] + o.bbox[2]) / 2 / vw,
+                y: (o.bbox[1] + o.bbox[3]) / 2 / vh,
+                confidence: o.confidence,
+              }))
+              .filter(
+                (o: { x: number; y: number }) =>
+                  o.x > 0.05 && o.x < 0.95 && o.y > 0.2 && o.y < 0.95
+              )
+              .sort(
+                (a: { confidence: number }, b: { confidence: number }) =>
+                  b.confidence - a.confidence
+              )
+              .slice(0, 14)
+              .sort((a: { y: number }, b: { y: number }) => a.y - b.y)
+              .map((o: { x: number; y: number; confidence: number }, i: number) => ({
+                id: `p${i}`,
+                x: o.x,
+                y: o.y,
+                confidence: o.confidence,
+              })),
+          })
+        );
         setDetectionFrames(frames);
       }
 
-      // Step 3: store results for /search endpoint
-      if (detectData) {
-        await fetch(`${API_BASE}/store-results`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            video_id: film.filename,
-            gcs_uri: film.gcs_uri,
-            fps: detectData.fps ?? 30,
-            frame_count: detectData.total_frames ?? 0,
-            detections: [],
-          }),
-        });
-      }
+      // Parse stats
+      setVideoStats({
+        totalFrames: data.total_frames || 0,
+        fps: data.fps || 30,
+        resolution: data.resolution || "unknown",
+        processedFrames: data.processed_frames || 0,
+        playersDetected: data.total_detections || 0,
+        maxPlayersInFrame: data.max_people_in_frame || 0,
+        avgPlayersPerFrame: data.avg_people_per_detection_frame || 0,
+        ballDetectionRate: data.ball_detection_rate || 0,
+        ballSpeed: data.ball_speed || null,
+        playSummary: data.play_summary || {},
+      });
+
+      setStatusMessage("Analysis complete!");
+      setTimeout(() => setStatusMessage(null), 3000);
     } catch (err) {
-      console.error("Detection/results error:", err);
+      console.error("Detection error:", err);
+      setErrorMessage(err instanceof Error ? err.message : "Detection failed");
+      setStatusMessage(null);
     } finally {
       setAnalyzing(false);
     }
   }
 
-  async function handleUploadComplete(result: UploadResponse, localUrl: string) {
+  // ─── Handle New Upload (from card grid) ─────────────────────
+  async function handleNewUpload(file: File) {
+    const localUrl = URL.createObjectURL(file);
     const film: FilmRecord = {
       id: crypto.randomUUID(),
-      filename: result.filename,
-      gcs_uri: result.gcs_uri,
+      filename: file.name,
+      gcs_uri: "",
       uploadedAt: new Date().toISOString(),
     };
-    localUrls.set(film.id, localUrl);
+
+    localUrlsRef.current.set(film.id, localUrl);
     setFilms((prev) => {
       const updated = [film, ...prev];
       saveFilms(updated);
       return updated;
     });
-    openReview(film, localUrl);
+
+    // Switch to review screen immediately
+    setActiveFilm(film);
+    setLocalVideoUrl(localUrl);
+    setDetectionFrames([]);
+    setPlays([]);
+    setVideoStats(null);
+    setCurrentTime(0);
+    setVideoDuration(0);
+    setErrorMessage(null);
+    setAnalyzing(true);
+    setStatusMessage("Uploading video to Google Cloud Storage...");
+    setScreen("review");
+
+    try {
+      const uploadResult = await uploadToGCS(file);
+
+      const updatedFilm = { ...film, gcs_uri: uploadResult.gcs_uri };
+      setActiveFilm(updatedFilm);
+      setFilms((prev) => {
+        const updated = prev.map((f) => (f.id === film.id ? updatedFilm : f));
+        saveFilms(updated);
+        return updated;
+      });
+
+      setStatusMessage("Upload complete! Starting AI analysis...");
+      await runDetection(uploadResult.gcs_uri);
+    } catch (err) {
+      console.error("Upload/detection pipeline error:", err);
+      setAnalyzing(false);
+      setStatusMessage(null);
+      setErrorMessage(
+        err instanceof Error
+          ? `Error: ${err.message}`
+          : "Something went wrong. Check that the backend is running on port 8000."
+      );
+    }
   }
 
-function handleSeek(time: number) {
-    playerRef.current?.seek(time);
+  // ─── Open Review for existing film ──────────────────────────
+  async function openReview(film: FilmRecord, localUrl: string) {
+    setActiveFilm(film);
+    setLocalVideoUrl(localUrl);
+    setDetectionFrames([]);
+    setPlays([]);
+    setVideoStats(null);
+    setCurrentTime(0);
+    setVideoDuration(0);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setScreen("review");
+
+    if (film.gcs_uri) {
+      runDetection(film.gcs_uri);
+    } else {
+      // Need to upload first
+      setAnalyzing(true);
+      setStatusMessage("Uploading video to Google Cloud Storage...");
+      try {
+        // Re-fetch the file from blob URL
+        const resp = await fetch(localUrl);
+        const blob = await resp.blob();
+        const file = new File([blob], film.filename, { type: blob.type });
+        const uploadResult = await uploadToGCS(file);
+
+        const updatedFilm = { ...film, gcs_uri: uploadResult.gcs_uri };
+        setActiveFilm(updatedFilm);
+        setFilms((prev) => {
+          const updated = prev.map((f) => (f.id === film.id ? updatedFilm : f));
+          saveFilms(updated);
+          return updated;
+        });
+
+        setStatusMessage("Upload complete! Starting AI analysis...");
+        await runDetection(uploadResult.gcs_uri);
+      } catch (err) {
+        console.error("Upload error:", err);
+        setAnalyzing(false);
+        setStatusMessage(null);
+        setErrorMessage(err instanceof Error ? err.message : "Upload failed");
+      }
+    }
   }
 
   function goToLibrary() {
     setScreen("library");
     setActiveFilm(null);
+    setStatusMessage(null);
+    setErrorMessage(null);
   }
 
-  const mockToggle = (
-    <button
-      onClick={() => setMockMode((p) => !p)}
-      className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-all"
-      style={
-        mockMode
-          ? { background: "var(--ppu-orange-dim)", color: "var(--ppu-orange)", borderColor: "rgba(255,99,0,0.4)" }
-          : { background: "transparent", color: "#64748b", borderColor: "var(--ppu-border)" }
-      }
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${mockMode ? "bg-orange-500" : "bg-slate-600"}`} />
-      Mock data {mockMode ? "on" : "off"}
-    </button>
-  );
-
+  // ─── Library View ───────────────────────────────────────────
   if (screen === "library") {
     return (
-      <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--ppu-navy)" }}>
+      <div className="flex flex-col h-screen overflow-hidden">
         <Nav onBackToLibrary={goToLibrary} />
         <FilmLibrary
           films={films}
-          localUrls={localUrls}
+          localUrls={localUrlsRef.current}
           onOpen={(film, url) => openReview(film, url)}
-          onReupload={(film, url) => { localUrls.set(film.id, url); openReview(film, url); }}
-          onNewUpload={(file: File) => {
-            const localUrl = URL.createObjectURL(file);
-            const film: FilmRecord = {
-              id: crypto.randomUUID(),
-              filename: file.name,
-              gcs_uri: "",
-              uploadedAt: new Date().toISOString(),
-            };
-            setFilms((prev) => [film, ...prev]);
-            localUrls.set(film.id, localUrl);
-            openReview(film, localUrl);
+          onReupload={(film, file) => {
+            const url = URL.createObjectURL(file);
+            localUrlsRef.current.set(film.id, url);
+            openReview(film, url);
           }}
+          onNewUpload={handleNewUpload}
         />
       </div>
     );
   }
 
-  if (screen === "upload") {
-    return (
-      <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--ppu-navy)" }}>
-        <Nav onBackToLibrary={goToLibrary} />
-        <VideoUploader onUploadComplete={handleUploadComplete} />
-      </div>
-    );
-  }
-
-  // Review screen
+  // ─── Review View ────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--ppu-navy)" }}>
+    <div className="flex flex-col h-screen overflow-hidden">
       <Nav
         currentFilm={activeFilm?.filename}
         onBackToLibrary={goToLibrary}
-        rightSlot={mockToggle}
+        analyzing={analyzing}
       />
+
+      {/* Status / Error banner */}
+      {(statusMessage || errorMessage) && (
+        <div
+          className="px-4 py-2.5 text-center text-xs font-medium shrink-0 flex items-center justify-center gap-2"
+          style={{
+            background: errorMessage ? "rgba(239,68,68,0.15)" : "var(--ppu-orange-dim)",
+            color: errorMessage ? "#ef4444" : "var(--ppu-orange)",
+          }}
+        >
+          {analyzing && !errorMessage && (
+            <span
+              className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin shrink-0"
+              style={{
+                borderColor: "var(--ppu-orange)",
+                borderTopColor: "transparent",
+              }}
+            />
+          )}
+          {errorMessage ? <span>{errorMessage}</span> : <span>{statusMessage}</span>}
+          {errorMessage && (
+            <button
+              onClick={() => setErrorMessage(null)}
+              className="ml-2 underline opacity-70 hover:opacity-100"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
+        {/* Main content: video + timeline */}
         <div className="flex flex-col flex-1 overflow-hidden">
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden p-2">
             <VideoPlayer
               ref={playerRef}
               src={localVideoUrl}
               detections={detectionFrames}
-              plays={activePlays}
+              plays={plays}
               analyzing={analyzing}
               onTimeUpdate={setCurrentTime}
               onDurationChange={setVideoDuration}
@@ -265,14 +411,18 @@ function handleSeek(time: number) {
             />
           </div>
           <PlayTimeline
-            plays={activePlays}
+            plays={plays}
             duration={videoDuration}
             analyzing={analyzing}
-            onSeek={handleSeek}
+            onSeek={(t) => playerRef.current?.seek(t)}
           />
         </div>
-        <div className="w-64 shrink-0">
-          <PlayerTrackingPanel
+
+        {/* Stats sidebar */}
+        <div className="w-72 shrink-0">
+          <StatsPanel
+            stats={videoStats}
+            plays={plays}
             players={currentPlayers}
             currentTime={currentTime}
             analyzing={analyzing}

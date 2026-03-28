@@ -108,21 +108,34 @@ def detect_in_video(gcs_uri: str) -> dict:
                     if int(box.cls) == 0 and (box.xyxy[0][3] - box.xyxy[0][1]) >= min_player_height
                 ]
 
-                # Ball detection — try trained model first, then COCO fallback
+                # Ball detection + play type detection from trained model
+                # Trained model classes: 0=objects, 1=Dig, 2=Net, 3=Outer white line,
+                #   4=People, 5=Serve, 6=Set, 7=Volleyball
                 ball_boxes = []
+                frame_play_labels = []  # Direct play detections from trained model
 
-                # Method 1: Custom-trained model (class 0 = Ball)
                 if trained is not None:
-                    trained_results = trained(frame, verbose=False, conf=0.15)
+                    trained_results = trained(frame, verbose=False, conf=0.2)
                     for box in trained_results[0].boxes:
-                        if int(box.cls) == 0:
-                            x1, y1, x2, y2 = box.xyxy[0]
+                        cls_id = int(box.cls)
+                        conf = float(box.conf[0])
+                        x1, y1, x2, y2 = box.xyxy[0]
+
+                        if cls_id == 7:  # Volleyball
                             bw, bh = float(x2 - x1), float(y2 - y1)
                             max_ball = min(width, height) * 0.15
                             if 3 < bw < max_ball and 3 < bh < max_ball:
                                 ball_boxes.append(box)
 
-                # Method 2: COCO sports ball fallback (class 32)
+                        elif cls_id in (1, 5, 6):  # Dig, Serve, Set
+                            play_map = {1: "dig", 5: "serve", 6: "set"}
+                            frame_play_labels.append({
+                                "play": play_map[cls_id],
+                                "confidence": round(conf, 3),
+                                "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                            })
+
+                # COCO sports ball fallback (class 32)
                 if not ball_boxes:
                     for box in pretrained_results[0].boxes:
                         if int(box.cls) == 32:  # COCO sports ball
@@ -167,6 +180,10 @@ def detect_in_video(gcs_uri: str) -> dict:
                         "confidence": round(float(box.conf[0]), 3),
                         "bbox": [float(x1), float(y1), float(x2), float(y2)],
                     })
+
+                # Add direct play detections from trained model
+                if frame_play_labels:
+                    frame_obj["direct_plays"] = frame_play_labels
 
                 frames_detections.append(frame_obj)
 

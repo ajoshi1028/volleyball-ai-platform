@@ -42,4 +42,8 @@ backend/*.log
 backend/training_output/
 backend/roboflow_dataset/
 backend/yolo_dataset/
+backend/yolo_v2_train/
+backend/train/
+backend/test/
+backend/valid/
 *.pt
