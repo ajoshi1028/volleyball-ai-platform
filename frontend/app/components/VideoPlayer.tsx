@@ -113,7 +113,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
         offsetY = (rect.height - renderH) / 2;
       }
 
-      // Draw player bounding boxes
+      // Draw bounding boxes — only highlight key players making the play
       for (const obj of frame.objects) {
         const [x1, y1, x2, y2] = obj.bbox;
         const dx = x1 * scaleX + offsetX;
@@ -122,34 +122,54 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
         const dh = (y2 - y1) * scaleY;
 
         if (obj.label === "player") {
-          const color = activePlay ? (PLAY_COLORS[activePlay.label.toLowerCase()] || "#ff6300") : "#ff6300";
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(dx, dy, dw, dh);
+          const isKeyPlayer = (obj as any).is_key_player === true;
+          const playType = (obj as any).play as string | undefined;
 
-          // Confidence label
-          const conf = Math.round(obj.confidence * 100);
-          ctx.font = "bold 11px sans-serif";
-          const labelText = activePlay
-            ? `${activePlay.label} ${conf}%`
-            : `Player ${conf}%`;
-          const textW = ctx.measureText(labelText).width;
+          if (isKeyPlayer && playType) {
+            // KEY PLAYER — bold colored box + play label
+            const color = PLAY_COLORS[playType] || "#ff6300";
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(dx, dy, dw, dh);
 
-          ctx.fillStyle = color;
-          ctx.fillRect(dx, dy - 18, textW + 8, 18);
-          ctx.fillStyle = "#fff";
-          ctx.fillText(labelText, dx + 4, dy - 5);
+            // Glow effect
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 8;
+            ctx.strokeRect(dx, dy, dw, dh);
+            ctx.shadowBlur = 0;
+
+            // Play label with confidence
+            const conf = Math.round(obj.confidence * 100);
+            const labelText = `${playType.charAt(0).toUpperCase() + playType.slice(1)} ${conf}%`;
+            ctx.font = "bold 13px sans-serif";
+            const textW = ctx.measureText(labelText).width;
+
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(dx, dy - 22, textW + 12, 22, 4);
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.fillText(labelText, dx + 6, dy - 6);
+          } else {
+            // OTHER PLAYERS — subtle thin outline only
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(dx, dy, dw, dh);
+          }
         } else if (obj.label === "ball") {
-          // Ball: bright circle
+          // Ball: bright yellow circle with glow
           const cx = (x1 + x2) / 2 * scaleX + offsetX;
           const cy = (y1 + y2) / 2 * scaleY + offsetY;
-          const r = Math.max(dw, dh) / 2 + 4;
+          const r = Math.max(dw, dh) / 2 + 5;
 
           ctx.beginPath();
           ctx.arc(cx, cy, r, 0, Math.PI * 2);
           ctx.strokeStyle = "#fbbf24";
           ctx.lineWidth = 3;
+          ctx.shadowColor = "#fbbf24";
+          ctx.shadowBlur = 10;
           ctx.stroke();
+          ctx.shadowBlur = 0;
 
           ctx.font = "bold 12px sans-serif";
           ctx.fillStyle = "#fbbf24";

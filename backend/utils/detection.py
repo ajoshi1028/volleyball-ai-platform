@@ -249,25 +249,41 @@ def detect_in_video(gcs_uri: str) -> dict:
         stats["ball_positions"] = ball_positions
 
         # ─── Sampled detection frames for frontend overlay ───────
-        # Send every Nth frame to keep response size reasonable
+        # Tag key players for each play so the frontend only highlights them
         play_segments = play_result.get("plays", [])
         overlay_frames = []
 
-        # Include frames during active plays (most important)
         for fd in frames_detections:
             t = fd["timestamp_sec"]
             active_play = None
+            key_indices = []
+
             for seg in play_segments:
                 if seg["start_time_sec"] <= t <= seg["end_time_sec"]:
                     active_play = seg["play"]
+                    key_indices = seg.get("key_player_indices", [])
                     break
 
-            # Include this frame if: it's during a play, OR every 10th frame
+            # Include frames during plays + every 10th sampled frame for general tracking
             if active_play or fd["frame"] % 50 == 0:
+                # Mark which players are making the play
+                players_only = [o for o in fd["objects"] if o["label"] == "player"]
+                objects_out = []
+                for i, obj in enumerate(fd["objects"]):
+                    obj_copy = dict(obj)
+                    if obj["label"] == "player":
+                        player_idx = sum(1 for o in fd["objects"][:fd["objects"].index(obj)] if o["label"] == "player")
+                        if active_play and player_idx in key_indices:
+                            obj_copy["is_key_player"] = True
+                            obj_copy["play"] = active_play
+                        else:
+                            obj_copy["is_key_player"] = False
+                    objects_out.append(obj_copy)
+
                 overlay_frames.append({
                     "frame": fd["frame"],
                     "timestamp": round(fd["timestamp_sec"], 3),
-                    "objects": fd["objects"],
+                    "objects": objects_out,
                     "play": active_play,
                 })
 
