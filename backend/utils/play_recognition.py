@@ -1,12 +1,17 @@
 """
 Play recognition for volleyball AI platform.
 
-Segments video into plays based on player positioning changes over time.
-Uses adaptive thresholds computed from the actual detection data.
+Designed for END-ZONE camera angle (camera behind baseline):
+  - y=0 (top of frame)    → far end of court / net area
+  - y=1 (bottom of frame) → near baseline / camera side
+  - x                     → lateral court position (left/right)
+
+Near team = large bboxes, high y values (bottom half of frame)
+Far team  = small bboxes, low y values (top half of frame)
 """
 
-from typing import Optional
 import statistics
+from collections import Counter
 
 
 BBox = list[float]
@@ -21,20 +26,20 @@ def _height(bbox: BBox) -> float:
     return abs(bbox[3] - bbox[1])
 
 
-def _width(bbox: BBox) -> float:
-    return abs(bbox[2] - bbox[0])
-
-
 def _find_players(frame_data: dict) -> list[dict]:
     return [obj for obj in frame_data.get("objects", []) if obj["label"] == "player"]
 
 
 def recognize_plays(detection_result: dict) -> dict:
     """
-    Analyze player positioning across frames to identify volleyball plays.
+    Classify volleyball plays using end-zone camera perspective.
 
-    Computes per-frame metrics (height ratios, clustering, court balance)
-    and detects play transitions based on metric changes over time.
+    Key signals:
+      - Near team (y > 0.55): serving/defensive side closest to camera
+      - Far team  (y < 0.45): attacking/net side furthest from camera
+      - Net zone  (y < 0.35): players very close to the net
+      - X-spread of near team: wide = defensive/passing formation
+      - Height ratio spike: someone jumping
     """
     detections = detection_result.get("detections", [])
     fps = detection_result.get("fps", 30.0)
@@ -47,7 +52,7 @@ def recognize_plays(detection_result: dict) -> dict:
     frame_metrics = []
     for frame_data in detections:
         players = _find_players(frame_data)
-        if len(players) < 3:
+        if len(players) < 4:
             frame_metrics.append(None)
             continue
 
@@ -56,81 +61,86 @@ def recognize_plays(detection_result: dict) -> dict:
         ys = [c[1] for c in centers]
         xs = [c[0] for c in centers]
 
-        med_y = statistics.median(ys)
         med_h = statistics.median(heights)
         max_h = max(heights)
 
+        # Split by court depth (y position in frame)
+        near_idxs = [i for i, y in enumerate(ys) if y > 0.55]   # near team
+        far_idxs  = [i for i, y in enumerate(ys) if y < 0.45]   # far team
+        net_count = len([y for y in ys if y < 0.35])             # at net
+
+        near_xs = [xs[i] for i in near_idxs]
+        far_xs  = [xs[i] for i in far_idxs]
+        near_ys = [ys[i] for i in near_idxs]
+
+        near_x_spread = max(near_xs) - min(near_xs) if len(near_xs) >= 2 else 0
+        far_x_spread  = max(far_xs)  - min(far_xs)  if len(far_xs)  >= 2 else 0
+        max_y = max(ys)  # how far back the deepest near player is
+
         frame_metrics.append({
-            "frame": frame_data.get("frame", 0),
-            "timestamp": frame_data.get("timestamp_sec", 0),
-            "num_players": len(players),
-            "forward": len([y for y in ys if y < med_y - 15]),
-            "back": len([y for y in ys if y > med_y + 15]),
-            "height_ratio": max_h / med_h if med_h > 0 else 1,
-            "x_spread": max(xs) - min(xs),
-            "y_spread": max(ys) - min(ys),
-            "mean_y": statistics.mean(ys),
-            "mean_x": statistics.mean(xs),
+            "frame":         frame_data.get("frame", 0),
+            "timestamp":     frame_data.get("timestamp_sec", 0),
+            "num_players":   len(players),
+            "near_count":    len(near_idxs),
+            "far_count":     len(far_idxs),
+            "net_count":     net_count,
+            "near_x_spread": near_x_spread,
+            "far_x_spread":  far_x_spread,
+            "height_ratio":  max_h / med_h if med_h > 0 else 1,
+            "max_y":         max_y,
         })
 
-    # Filter out None frames
-    valid_metrics = [m for m in frame_metrics if m is not None]
-    if len(valid_metrics) < 5:
+    valid = [m for m in frame_metrics if m is not None]
+    if len(valid) < 5:
         return {"video_id": video_id, "fps": fps, "plays": [], "summary": {}}
 
-    # ─── Step 2: Compute global baselines ────────────────────────
-    all_hr = [m["height_ratio"] for m in valid_metrics]
-    all_fwd = [m["forward"] for m in valid_metrics]
-    all_bck = [m["back"] for m in valid_metrics]
-    all_ysp = [m["y_spread"] for m in valid_metrics]
-    all_np = [m["num_players"] for m in valid_metrics]
+    # ─── Step 2: Compute baselines ───────────────────────────────
+    med_hr      = statistics.median([m["height_ratio"]  for m in valid])
+    med_near_xs = statistics.median([m["near_x_spread"] for m in valid])
+    med_far_xs  = statistics.median([m["far_x_spread"]  for m in valid])
+    med_net     = statistics.median([m["net_count"]      for m in valid])
+    med_near    = statistics.median([m["near_count"]     for m in valid])
+    med_max_y   = statistics.median([m["max_y"]          for m in valid])
 
-    med_hr = statistics.median(all_hr)
-    med_fwd = statistics.median(all_fwd)
-    med_bck = statistics.median(all_bck)
-    med_ysp = statistics.median(all_ysp)
-    med_np = statistics.median(all_np)
-
-    # ─── Step 3: Classify each frame based on deviation ──────────
+    # ─── Step 3: Classify each frame ─────────────────────────────
     labels = []
     for m in frame_metrics:
         if m is None:
             labels.append(None)
             continue
 
-        hr = m["height_ratio"]
-        fwd = m["forward"]
-        bck = m["back"]
-        ysp = m["y_spread"]
-        np_ = m["num_players"]
+        hr          = m["height_ratio"]
+        near_xs     = m["near_x_spread"]
+        net         = m["net_count"]
+        near        = m["near_count"]
+        max_y       = m["max_y"]
 
-        # Spike: someone jumping (height ratio above median)
-        if hr > med_hr * 1.1 and fwd >= med_fwd:
-            labels.append("spike")
-        # Block: more players forward, somewhat tight Y spread
-        elif fwd > med_fwd + 1 and ysp < med_ysp * 0.95:
-            labels.append("block")
-        # Serve: back-heavy formation
-        elif bck > med_bck + 2:
+        # Serve: near team spread wide in passing formation + one player
+        #        deep at baseline (server is isolated far back)
+        if near_xs > med_near_xs * 1.15 and max_y > med_max_y * 1.05:
             labels.append("serve")
-        # Dig: more players back with wider Y spread
-        elif bck > fwd + 1 and ysp > med_ysp * 1.05:
+        # Block: multiple players clustered at the net
+        elif net > med_net + 1:
+            labels.append("block")
+        # Spike: height ratio spike with net activity
+        elif hr > med_hr * 1.1 and net >= med_net:
+            labels.append("spike")
+        # Dig: near team spread wide (passing/defensive formation)
+        elif near_xs > med_near_xs * 1.1 and near >= med_near:
             labels.append("dig")
-        # Set: roughly balanced positioning
-        elif abs(fwd - bck) <= 1:
+        # Set: players converging toward center (tighter than usual)
+        elif near_xs < med_near_xs * 0.85 and near >= med_near:
             labels.append("set")
         else:
             labels.append(None)
 
-    # ─── Step 4: Smooth labels (remove noise) ────────────────────
-    # Apply majority voting in sliding window of 5
-    from collections import Counter
+    # ─── Step 4: Smooth with majority voting (window=5) ──────────
     smoothed = list(labels)
     half = 2
     for i in range(half, len(smoothed) - half):
         window = labels[i - half:i + half + 1]
         non_none = [w for w in window if w is not None]
-        if len(non_none) >= 3:  # require majority to agree
+        if len(non_none) >= 3:
             most_common, count = Counter(non_none).most_common(1)[0]
             smoothed[i] = most_common if count >= 3 else None
         else:
@@ -146,34 +156,26 @@ def recognize_plays(detection_result: dict) -> dict:
 
         label = smoothed[i]
         start_idx = i
-
         while i < len(smoothed) and smoothed[i] == label:
             i += 1
-
         end_idx = i - 1
         run_len = end_idx - start_idx + 1
 
-        if run_len >= 3:  # minimum 3 detected frames (~0.5 seconds at every-10th-frame sampling)
+        if run_len >= 3:
             start_m = frame_metrics[start_idx]
-            end_m = frame_metrics[end_idx]
+            end_m   = frame_metrics[end_idx]
             if start_m and end_m:
                 segments.append({
-                    "play": label,
-                    "start_frame": start_m["frame"],
-                    "end_frame": end_m["frame"],
+                    "play":          label,
+                    "start_frame":   start_m["frame"],
+                    "end_frame":     end_m["frame"],
                     "start_time_sec": round(start_m["timestamp"], 2),
-                    "end_time_sec": round(end_m["timestamp"], 2),
+                    "end_time_sec":   round(end_m["timestamp"], 2),
                 })
 
     # ─── Step 6: Summary ─────────────────────────────────────────
     summary = {}
     for seg in segments:
-        p = seg["play"]
-        summary[p] = summary.get(p, 0) + 1
+        summary[seg["play"]] = summary.get(seg["play"], 0) + 1
 
-    return {
-        "video_id": video_id,
-        "fps": fps,
-        "plays": segments,
-        "summary": summary,
-    }
+    return {"video_id": video_id, "fps": fps, "plays": segments, "summary": summary}
