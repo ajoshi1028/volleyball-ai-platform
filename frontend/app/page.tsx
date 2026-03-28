@@ -135,7 +135,7 @@ export default function Home() {
               y: ((o.bbox[1] + o.bbox[3]) / 2) / vh,
               confidence: o.confidence,
             }))
-            .filter((o) => o.x > 0.07 && o.x < 0.93 && o.y > 0.07 && o.y < 0.93)
+            .filter((o) => o.x > 0.13 && o.x < 0.87 && o.y > 0.38 && o.y < 0.88)
             .sort((a, b) => b.confidence - a.confidence)
             .slice(0, 14)
             .sort((a, b) => a.x - b.x)  // stable sort by x so same div animates between positions

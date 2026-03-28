@@ -56,18 +56,33 @@ def recognize_plays(detection_result: dict) -> dict:
             frame_metrics.append(None)
             continue
 
-        centers = [_center(p["bbox"]) for p in players]
-        heights = [_height(p["bbox"]) for p in players]
+        all_centers = [_center(p["bbox"]) for p in players]
+        all_heights = [_height(p["bbox"]) for p in players]
+
+        # Filter to court area only (matches frontend border filter)
+        # x: 0.13-0.87, y: 0.38-0.88 — excludes coaches, side stands, far stands
+        court_players = [
+            (all_centers[i], all_heights[i])
+            for i in range(len(players))
+            if 0.13 < all_centers[i][0] < 0.87 and 0.38 < all_centers[i][1] < 0.88
+        ]
+        if len(court_players) < 4:
+            frame_metrics.append(None)
+            continue
+
+        centers = [cp[0] for cp in court_players]
+        heights = [cp[1] for cp in court_players]
         ys = [c[1] for c in centers]
         xs = [c[0] for c in centers]
 
         med_h = statistics.median(heights)
         max_h = max(heights)
 
+        # Net is at ~y=0.44 of frame from end-zone camera
         # Split by court depth (y position in frame)
-        near_idxs = [i for i, y in enumerate(ys) if y > 0.55]   # near team
-        far_idxs  = [i for i, y in enumerate(ys) if y < 0.45]   # far team
-        net_count = len([y for y in ys if y < 0.35])             # at net
+        near_idxs = [i for i, y in enumerate(ys) if y > 0.58]   # near team (backcourt)
+        far_idxs  = [i for i, y in enumerate(ys) if y < 0.50]   # far team (front court)
+        net_count = len([y for y in ys if y < 0.50])             # near/at net
 
         near_xs = [xs[i] for i in near_idxs]
         far_xs  = [xs[i] for i in far_idxs]
