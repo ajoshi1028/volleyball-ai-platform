@@ -46,7 +46,8 @@ backend/yolo_v2_train/
 backend/train/
 backend/test/
 backend/valid/
-*.pt
+# *.pt — keep volleyball_trained.pt for deployment
+!backend/volleyball_trained.pt
 runs/
 
 # -------- Claude Code --------
