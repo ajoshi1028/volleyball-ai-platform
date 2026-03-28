@@ -124,27 +124,48 @@ export default function Home() {
       if (detectData?.frames_detections) {
         const vw: number = detectData.video_width ?? 1920;
         const vh: number = detectData.video_height ?? 1080;
-        const frames: DetectionFrame[] = (detectData.frames_detections as { frame: number; timestamp_sec: number; objects: { label: string; confidence: number; bbox: number[] }[] }[]).map((f) => ({
-          frame: f.frame,
-          timestamp: f.timestamp_sec,
-          players: f.objects
-            .filter((o) => o.label === "player")
-            .map((o) => ({
-              nx: ((o.bbox[0] + o.bbox[2]) / 2) / vw,
-              ny: ((o.bbox[1] + o.bbox[3]) / 2) / vh,
-              confidence: o.confidence,
-            }))
-            .filter((o) => o.nx > 0.07 && o.nx < 0.93 && o.ny > 0.07 && o.ny < 0.93)
-            .sort((a, b) => b.confidence - a.confidence)
-            .slice(0, 14)
-            .map((o, i) => ({
-              id: `p${i}`,
-              x: o.nx,
-              y: o.ny,
-              confidence: o.confidence,
-            })),
-        }));
-        setDetectionFrames(frames);
+
+        // Build raw frames (no IDs yet)
+        type RawPlayer = { x: number; y: number; confidence: number };
+        const rawFrames: { frame: number; timestamp: number; players: RawPlayer[] }[] =
+          (detectData.frames_detections as { frame: number; timestamp_sec: number; objects: { label: string; confidence: number; bbox: number[] }[] }[]).map((f) => ({
+            frame: f.frame,
+            timestamp: f.timestamp_sec,
+            players: f.objects
+              .filter((o) => o.label === "player")
+              .map((o) => ({
+                x: ((o.bbox[0] + o.bbox[2]) / 2) / vw,
+                y: ((o.bbox[1] + o.bbox[3]) / 2) / vh,
+                confidence: o.confidence,
+              }))
+              .filter((o) => o.x > 0.07 && o.x < 0.93 && o.y > 0.07 && o.y < 0.93)
+              .sort((a, b) => b.confidence - a.confidence)
+              .slice(0, 14),
+          }));
+
+        // Assign stable IDs by nearest-neighbour matching across frames
+        let nextId = 0;
+        const trackedFrames: DetectionFrame[] = [];
+        let prevPlayers: TrackedPlayer[] = [];
+
+        for (const raw of rawFrames) {
+          const used = new Set<string>();
+          const assigned: TrackedPlayer[] = raw.players.map((curr) => {
+            let bestId: string | null = null;
+            let bestDist = 0.12; // max match distance in normalized coords
+            for (const prev of prevPlayers) {
+              if (used.has(prev.id)) continue;
+              const d = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+              if (d < bestDist) { bestDist = d; bestId = prev.id; }
+            }
+            if (bestId) { used.add(bestId); return { ...curr, id: bestId }; }
+            return { ...curr, id: `p${nextId++}` };
+          });
+          prevPlayers = assigned;
+          trackedFrames.push({ frame: raw.frame, timestamp: raw.timestamp, players: assigned });
+        }
+
+        setDetectionFrames(trackedFrames);
       }
 
       // Step 3: store results for /search endpoint

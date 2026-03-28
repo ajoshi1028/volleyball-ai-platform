@@ -67,31 +67,35 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
               <div className="absolute top-2 bottom-2 w-px" style={{ left: "calc(50% + 22%)", background: "#1e3a4a", opacity: 0.6 }} />
 
               {/* Player dots — absolutely positioned with CSS transitions */}
-              {players.map((p, i) => (
-                <div
-                  key={p.id}
-                  className="absolute flex items-center justify-center rounded-full text-white font-bold"
-                  style={{
-                    left: `${p.x * 100}%`,
-                    top: `${p.y * 100}%`,
-                    width: 18,
-                    height: 18,
-                    fontSize: 8,
-                    marginLeft: -9,
-                    marginTop: -9,
-                    background: "var(--ppu-orange)",
-                    opacity: 0.5 + p.confidence * 0.5,
-                    transition: "left 0.12s ease, top 0.12s ease, opacity 0.12s ease",
-                  }}
-                >
-                  {i + 1}
-                </div>
-              ))}
+              {players.map((p) => {
+                const num = parseInt(p.id.replace("p", "")) + 1;
+                return (
+                  <div
+                    key={p.id}
+                    className="absolute flex items-center justify-center rounded-full text-white font-bold"
+                    style={{
+                      left: `${p.x * 100}%`,
+                      top: `${p.y * 100}%`,
+                      width: 18,
+                      height: 18,
+                      fontSize: 8,
+                      marginLeft: -9,
+                      marginTop: -9,
+                      background: "var(--ppu-orange)",
+                      opacity: 0.5 + p.confidence * 0.5,
+                      transition: "left 0.12s ease, top 0.12s ease, opacity 0.12s ease",
+                    }}
+                  >
+                    {num}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Player list */}
             <div className="space-y-1.5">
-              {players.map((p, i) => {
+              {players.map((p) => {
+                const num = parseInt(p.id.replace("p", "")) + 1;
                 const xLabel = p.x < 0.33 ? "Left" : p.x > 0.66 ? "Right" : "Center";
                 const yLabel = p.y < 0.4 ? "Front" : p.y > 0.7 ? "Back" : "Mid";
                 return (
@@ -100,7 +104,7 @@ export default function PlayerTrackingPanel({ players, currentTime, analyzing }:
                       className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-white shrink-0"
                       style={{ background: "var(--ppu-orange)", fontSize: 9 }}
                     >
-                      {i + 1}
+                      {num}
                     </div>
                     <div className="flex-1 flex items-center justify-between min-w-0">
                       <span className="text-xs text-slate-300">{yLabel} {xLabel}</span>
