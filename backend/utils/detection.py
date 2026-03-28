@@ -60,18 +60,15 @@ def detect_in_video(gcs_uri: str) -> dict:
         frame_count = 0
         processed_frames = 0
 
-        # Setup video writer for annotated video
-        output_path = Path(tmpdir) / "annotated_video.mp4"
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
 
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            # Process every 5th frame for speed
-            if frame_count % 5 == 0:
+            # Process every 10th frame for speed
+            if frame_count % 10 == 0:
                 # Use PRETRAINED model for person detection (COCO class 0 = person)
                 pretrained_results = pretrained_model(frame, verbose=False, conf=0.3)
                 pretrained_boxes = pretrained_results[0].boxes
@@ -131,13 +128,7 @@ def detect_in_video(gcs_uri: str) -> dict:
                     })
 
                 frames_detections.append(frame_obj)
-
-                # Draw boxes on frame using pretrained model's annotations
-                annotated_frame = pretrained_results[0].plot()
-                out.write(annotated_frame)
                 processed_frames += 1
-            else:
-                out.write(frame)
 
             frame_count += 1
 
@@ -153,7 +144,6 @@ def detect_in_video(gcs_uri: str) -> dict:
             )
 
         cap.release()
-        out.release()
 
         # Run play recognition on collected detections
         play_recognition_result = recognize_plays({
@@ -164,13 +154,7 @@ def detect_in_video(gcs_uri: str) -> dict:
             "detections": frames_detections
         })
 
-        # Upload annotated video
-        annotated_gcs_uri = upload_to_gcs(
-            str(output_path),
-            f"raw-videos/{Path(gcs_uri).stem}_annotated.mp4"
-        )
-
-        detections_stats["annotated_video_uri"] = annotated_gcs_uri
+        detections_stats["annotated_video_uri"] = ""
         detections_stats["processed_frames"] = processed_frames
         detections_stats["video_width"] = width
         detections_stats["video_height"] = height
